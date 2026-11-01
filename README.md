@@ -16,7 +16,7 @@ Everything (themes, icons, wallpaper, the Start menu) is original work. No Micro
 
 ### Classic or Modern
 
-Same layout, two looks. **Classic** is the blue and green one above. **Modern** is grey, flat and translucent:
+Same layout, two looks. **Modern** (the default) is grey, flat and translucent, with dark-mode apps. **Classic** is the blue and green one above:
 
 | Modern Start menu | Modern Turn Off dialog |
 |---|---|
@@ -26,7 +26,7 @@ Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox a
 
 ![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
 
-Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firefoxos-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. To make Modern the default for new users, put `modern` in `/etc/firefoxos/theme`.
+Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firefoxos-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firefoxos/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
@@ -115,6 +115,7 @@ The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_con
 | `ujust setup-waydroid [vanilla\|gapps]` | Download and initialise Android |
 | `ujust waydroid-google-id` | Print the Android ID to register a GAPPS install |
 | `ujust reset-waydroid` | Delete Android and its data |
+| `ujust fix-realtek-audio` | Fix silent/crackling Realtek onboard audio ([linux-audio-fix](https://github.com/hello2himel/linux-audio-fix), pinned + checksum-verified; also in Control Panel → Sound Troubleshooter) |
 | `ujust install-webapp-runtime` | (Re)install the firefoxpwa Firefox runtime |
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
