@@ -11,12 +11,19 @@ echo "Building FirefoxOS on Fedora ${FEDORA_VERSION}"
 
 # PWAsForFirefox (firefoxpwa) native component
 # https://pwasforfirefox.filips.si/installation/
+# Keys are pinned in build_files/keys: packagecloud's repo-metadata key, and
+# the upstream author's package-signing key (packagecloud no longer serves it):
+#   filips <projects@filips.si>, primary 744007D710DDC8E20673F5452D15DC76BD6B710C,
+#   signing subkey 912AD9BE47FEB404 (from keys.openpgp.org / keyserver.ubuntu.com)
+install -Dm0644 /ctx/keys/firefoxpwa-repo.asc /etc/pki/rpm-gpg/RPM-GPG-KEY-firefoxpwa-repo
+install -Dm0644 /ctx/keys/firefoxpwa-packages.asc /etc/pki/rpm-gpg/RPM-GPG-KEY-firefoxpwa
 cat > /etc/yum.repos.d/firefoxpwa.repo <<'EOF'
 [firefoxpwa]
 name=FirefoxPWA
 metadata_expire=7d
 baseurl=https://packagecloud.io/filips/FirefoxPWA/rpm_any/rpm_any/$basearch
-gpgkey=https://packagecloud.io/filips/FirefoxPWA/gpgkey
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-firefoxpwa-repo
+       file:///etc/pki/rpm-gpg/RPM-GPG-KEY-firefoxpwa
 repo_gpgcheck=1
 gpgcheck=1
 enabled=1
