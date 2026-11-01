@@ -22,6 +22,10 @@ Same layout, two looks. **Classic** is the blue and green one above. **Modern** 
 |---|---|
 | ![Modern Start menu](docs/screenshots/modern-start-menu.png) | ![Modern Turn off dialog](docs/screenshots/modern-turn-off.png) |
 
+Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox and web apps (which follow the system colour scheme), and Qt apps like the file manager. Classic switches them back to light.
+
+![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
+
 Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firefoxos-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. To make Modern the default for new users, put `modern` in `/etc/firefoxos/theme`.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>

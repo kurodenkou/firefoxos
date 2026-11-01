@@ -84,6 +84,11 @@ apply_running() {
     switch_wallpaper "$t"
 }
 
+# Light or dark apps (GTK, libadwaita, Firefox, Qt) to match the theme
+apply_apps() {
+    /usr/libexec/firefoxos/app-style "$THEMES/$1/theme.conf" || true
+}
+
 case "${1:-get}" in
     get) current ;;
     list) ls -1 "$THEMES" ;;
@@ -101,6 +106,7 @@ case "${1:-get}" in
         mkdir -p "$(dirname "$STATE_FILE")"
         echo "$t" > "$STATE_FILE"
         link_labwc_theme "$t"
+        apply_apps "$t"
         apply_running "$t"
         echo "Theme set to $t"
         ;;
