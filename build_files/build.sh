@@ -87,6 +87,7 @@ PACKAGES=(
     htop                         # Task Manager
     fastfetch
     pavucontrol                  # Sounds and Audio Devices
+    alsa-tools                   # hda-verb, for `ujust fix-realtek-audio`
     network-manager-applet       # tray icon
     nm-connection-editor         # Network Connections
     blueman                      # Bluetooth

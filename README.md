@@ -115,6 +115,7 @@ The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_con
 | `ujust setup-waydroid [vanilla\|gapps]` | Download and initialise Android |
 | `ujust waydroid-google-id` | Print the Android ID to register a GAPPS install |
 | `ujust reset-waydroid` | Delete Android and its data |
+| `ujust fix-realtek-audio` | Fix silent/crackling Realtek onboard audio ([linux-audio-fix](https://github.com/hello2himel/linux-audio-fix), pinned + checksum-verified; also in Control Panel → Sound Troubleshooter) |
 | `ujust install-webapp-runtime` | (Re)install the firefoxpwa Firefox runtime |
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |

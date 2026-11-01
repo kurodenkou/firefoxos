@@ -103,3 +103,37 @@ theme NAME="":
     else
         firefoxos-theme set "{{ NAME }}"
     fi
+
+# Fix silent/crackling Realtek onboard audio with hello2himel/linux-audio-fix.
+# Runs a pinned, checksum-verified copy; extra flags go to the script
+# (e.g. --dry-run, --list-chips, --restore, --uninstall).
+[group('FirefoxOS')]
+fix-realtek-audio *ARGS:
+    #!/usr/bin/bash
+    set -euo pipefail
+    # Pinned to the version reviewed for FirefoxOS. To update: change both
+    # lines after reading the new script.
+    COMMIT=4742f0b8153e863c3b800dd53b3fa255e89fed13
+    SHA256=a378fb4e73d095a0da5a77305c00daf6934b8b31ff352f0729f28f6b94b1b0d7
+    URL="https://raw.githubusercontent.com/hello2himel/linux-audio-fix/${COMMIT}/AudioFix.sh"
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    echo "Downloading AudioFix (github.com/hello2himel/linux-audio-fix @ ${COMMIT:0:7})..."
+    curl -fsSL "$URL" -o "$tmp/AudioFix.sh"
+    if ! echo "${SHA256}  $tmp/AudioFix.sh" | sha256sum -c --quiet; then
+        echo "Checksum mismatch: the downloaded script is not the reviewed version. Not running it." >&2
+        exit 1
+    fi
+    args=({{ ARGS }})
+    # On FirefoxOS, keep the fix by replaying the chip commands at boot.
+    # The script's default "modprobe" mode would force the legacy Intel
+    # driver (dsp_driver=1, can break audio on newer laptops) and try to
+    # rebuild the initramfs, which doesn't apply to image-based systems.
+    case " ${args[*]:-} " in
+        *" --persist-mode"*|*" --restore"*|*" --uninstall"*|*" --list-chips"*|*" --list "*|*" --no-persist "*) ;;
+        *) args+=(--persist-mode systemd) ;;
+    esac
+    bash "$tmp/AudioFix.sh" "${args[@]}"
+    echo
+    echo "FirefoxOS: ignore the /tmp path above. To undo later, use:"
+    echo "  ujust fix-realtek-audio --restore     (put mixer settings back)"
+    echo "  ujust fix-realtek-audio --uninstall   (stop re-applying at boot)"
