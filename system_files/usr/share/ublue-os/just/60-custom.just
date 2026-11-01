@@ -11,7 +11,9 @@ setup-waydroid TYPE="vanilla":
         *) echo "TYPE must be 'vanilla' or 'gapps'"; exit 1 ;;
     esac
     echo "Downloading the Android image (${SYS}). This is several hundred MB..."
-    sudo waydroid init -s "${SYS}" -f
+    sudo waydroid init -s "${SYS}" -f \
+        -c https://ota.waydro.id/system \
+        -v https://ota.waydro.id/vendor
     if command -v firewall-cmd >/dev/null && sudo firewall-cmd --state >/dev/null 2>&1; then
         # Let the Android container reach the network
         sudo firewall-cmd --zone=trusted --add-interface=waydroid0 --permanent

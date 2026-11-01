@@ -18,7 +18,6 @@
         "tray",
         "idle_inhibitor",
         "pulseaudio",
-        "network",
         "battery",
         "clock"
     ],
@@ -83,15 +82,6 @@
         "on-click": "pavucontrol",
         "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
         "scroll-step": 5
-    },
-    "network": {
-        "format-wifi": "",
-        "format-ethernet": "",
-        "format-disconnected": "",
-        "tooltip-format-wifi": "{essid} ({signalStrength}%)",
-        "tooltip-format-ethernet": "{ifname}: {ipaddr}",
-        "tooltip-format-disconnected": "Network cable unplugged",
-        "on-click": "nm-connection-editor"
     },
     "battery": {
         "format": "{icon}",
