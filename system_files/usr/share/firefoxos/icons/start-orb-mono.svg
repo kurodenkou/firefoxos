@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- Monochrome start orb for the Modern theme (original artwork) -->
+  <circle cx="24" cy="25" r="15" fill="none" stroke="#e8e8e8" stroke-width="3"/>
+  <path d="M7 28 C7 13 20 4 33 7 C27 8 24 11 24 13 C32 10 41 15 42 23 C38 19 34 19 32 21
+           C38 26 37 37 28 42 C38 42 44 33 43 26 C47 40 34 48 22 45 C12 43 7 36 7 28 Z"
+        fill="#e8e8e8" opacity="0.9"/>
+</svg>

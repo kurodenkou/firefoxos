@@ -1,0 +1,122 @@
+/*
+ * FirefoxOS taskbar: the classic blue "Luna" bar, green start button and
+ * light-blue notification area. Original styling, no copied assets.
+ */
+
+* {
+    font-family: Tahoma, "DejaVu Sans", "Font Awesome 6 Free", sans-serif;
+    font-size: 12px;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    color: #ffffff;
+    background-image: linear-gradient(to bottom,
+        #3168d5 0%, #4993e6 4%, #2157d7 10%, #2663e0 50%,
+        #245ddb 88%, #1941a5 100%);
+    border-top: 1px solid #0c2e99;
+}
+
+tooltip {
+    background: #ffffe1;
+    border: 1px solid #000000;
+    border-radius: 0;
+}
+tooltip label {
+    color: #000000;
+}
+
+/* ---- start button ---- */
+#custom-start {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: bold;
+    font-style: italic;
+    text-shadow: 1px 1px 1px #1a4d1a;
+    padding: 0 22px 0 40px;
+    margin-right: 6px;
+    border-radius: 0 12px 12px 0;
+    background-image:
+        url("/usr/share/firefoxos/icons/start-orb.svg"),
+        linear-gradient(to bottom,
+            #388e38 0%, #5fbf5f 8%, #3c9d3c 20%, #379537 70%,
+            #2d7f2d 90%, #1e5f1e 100%);
+    background-repeat: no-repeat, no-repeat;
+    background-position: 8px center, center;
+    background-size: 24px 24px, 100% 100%;
+    box-shadow: inset -2px 0 2px rgba(0, 0, 0, 0.35);
+}
+#custom-start:hover {
+    background-image:
+        url("/usr/share/firefoxos/icons/start-orb.svg"),
+        linear-gradient(to bottom,
+            #45a345 0%, #78d478 8%, #4cb34c 20%, #46aa46 70%,
+            #379037 90%, #256d25 100%);
+}
+
+/* ---- quick launch ---- */
+#image {
+    padding: 0 3px;
+}
+#image:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+    border-radius: 2px;
+}
+#custom-ql-sep {
+    margin: 4px 6px 4px 4px;
+    border-left: 1px solid #1941a5;
+    border-right: 1px solid #5d8ee8;
+    padding: 0;
+    min-width: 0;
+}
+
+/* ---- window buttons ---- */
+#taskbar {
+    margin-left: 2px;
+}
+#taskbar button {
+    color: #ffffff;
+    padding: 0 8px;
+    margin: 2px 2px 1px 0;
+    min-width: 150px;
+    border-radius: 3px;
+    background-image: linear-gradient(to bottom, #4c8cf5 0%, #3c81f3 10%, #3a7bef 90%, #2c62d6 100%);
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3), inset -1px -1px 0 rgba(0, 0, 0, 0.25);
+}
+#taskbar button:hover {
+    background-image: linear-gradient(to bottom, #6aa2ff 0%, #5393ff 10%, #4f8cfa 90%, #3b72e4 100%);
+}
+#taskbar button.active {
+    background-image: linear-gradient(to bottom, #1a4ab8 0%, #1e52b7 10%, #1e52b7 90%, #2257c4 100%);
+    box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+#taskbar button.minimized {
+    color: #d6e4ff;
+}
+
+/* ---- notification area ---- */
+#tray, #idle_inhibitor, #pulseaudio, #network, #battery, #clock {
+    background-image: linear-gradient(to bottom,
+        #0c59b9 0%, #139ee9 6%, #18b5f2 12%, #139beb 50%,
+        #1290e8 88%, #0d8dea 94%, #0c59b9 100%);
+    color: #ffffff;
+    padding: 0 6px;
+}
+#tray {
+    padding-left: 12px;
+    border-left: 1px solid #092e8f;
+    box-shadow: inset 1px 0 1px rgba(255, 255, 255, 0.35);
+}
+#idle_inhibitor, #pulseaudio, #network, #battery {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 12px;
+    padding: 0 5px;
+}
+#battery.warning { color: #ffe680; }
+#battery.critical { color: #ff8080; }
+#clock {
+    padding: 0 12px 0 8px;
+}

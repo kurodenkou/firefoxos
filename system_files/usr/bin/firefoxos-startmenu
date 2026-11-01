@@ -107,138 +107,25 @@ CATEGORIES = [
     ("System", "System Tools", "applications-system"),
 ]
 
-CSS = b"""
-#overlay { background-color: transparent; }
-#shade { background-color: transparent; }
-#shade.dim { background-color: rgba(0, 0, 0, 0.45); }
+THEMES_DIR = "/usr/share/firefoxos/themes"
 
-#menu {
-    font-family: Tahoma, "DejaVu Sans", sans-serif;
-    font-size: 12px;
-    background-color: #ffffff;
-    border: 1px solid #0831d9;
-    border-bottom: none;
-    border-radius: 8px 8px 0 0;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.45);
-}
 
-#header {
-    border-radius: 7px 7px 0 0;
-    padding: 6px 8px;
-    background-image: linear-gradient(to bottom,
-        #1868ce 0%, #4a8ae8 6%, #1c64d2 14%, #1a5fcf 80%, #1457c4 100%);
-}
-#header label { color: #ffffff; font-size: 15px; font-weight: bold; }
-#avatar {
-    border: 2px solid #ffffff;
-    border-radius: 4px;
-    background-color: #e8eefc;
-}
+def current_theme():
+    """The user's desktop theme (see firefoxos-theme), defaulting to classic."""
+    for path in (os.path.join(GLib.get_user_config_dir(), "firefoxos", "theme"), "/etc/firefoxos/theme"):
+        try:
+            with open(path) as fh:
+                name = fh.read().strip()
+        except OSError:
+            continue
+        if name and os.path.isdir(os.path.join(THEMES_DIR, name)):
+            return name
+    return "classic"
 
-#orangebar {
-    min-height: 2px;
-    background-image: linear-gradient(to right,
-        rgba(245, 158, 71, 0), #f59e47 50%, rgba(245, 158, 71, 0));
-}
 
-#left { background-color: #ffffff; padding: 4px; }
-#right {
-    background-color: #d3e5fa;
-    border-left: 1px solid #95bdee;
-    padding: 4px;
-}
-#right .item label.item-title { font-weight: bold; color: #00136b; }
-
-#footer {
-    padding: 4px 6px;
-    background-image: linear-gradient(to bottom,
-        #1457c4 0%, #2a6fd8 10%, #1d64d2 50%, #1a5ac9 90%, #10469f 100%);
-}
-#footer button {
-    color: #ffffff;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    padding: 2px 6px;
-}
-#footer button:hover { background-color: rgba(255, 255, 255, 0.18); border-radius: 3px; }
-#footer button label { color: #ffffff; }
-
-.item {
-    background: transparent;
-    background-image: none;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    padding: 3px 6px;
-    color: #000000;
-}
-.item:hover, .item:focus {
-    background-color: #316ac5;
-    background-image: none;
-}
-.item:hover label, .item:focus label { color: #ffffff; }
-.item label.subtitle { color: #7f7f7f; font-size: 11px; }
-.item label.item-title { font-weight: normal; }
-.item label.item-title.pinned { font-weight: bold; }
-
-separator.menusep {
-    min-height: 1px;
-    margin: 4px 8px;
-    background-image: linear-gradient(to right,
-        rgba(0, 0, 0, 0), #c4c4c4 50%, rgba(0, 0, 0, 0));
-    background-color: transparent;
-}
-#right separator.menusep {
-    background-image: linear-gradient(to right,
-        rgba(149, 189, 238, 0), #95bdee 50%, rgba(149, 189, 238, 0));
-}
-
-#allprograms label { font-weight: bold; }
-#allprograms .arrow {
-    color: #ffffff;
-    background-color: #2fa22f;
-    border-radius: 3px;
-    padding: 0 4px;
-}
-
-#allpage { background-color: #ffffff; }
-#allpage expander title label { font-weight: bold; }
-#allpage expander { padding: 2px 4px; }
-#search { margin: 6px; }
-
-#dialog {
-    font-family: Tahoma, "DejaVu Sans", sans-serif;
-    background-color: #ffffff;
-    border: 1px solid #0831d9;
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-#dialog-header {
-    border-radius: 7px 7px 0 0;
-    padding: 10px 14px;
-    background-image: linear-gradient(to bottom, #0a246a 0%, #1c4fb6 60%, #0a3ca6 100%);
-}
-#dialog-header label { color: #ffffff; font-size: 15px; font-weight: bold; }
-#dialog-body {
-    padding: 22px 26px;
-    background-image: linear-gradient(to bottom, #5a7edc 0%, #3d63c9 100%);
-}
-#dialog-body label { color: #ffffff; }
-#dialog-footer {
-    border-radius: 0 0 7px 7px;
-    padding: 8px 14px;
-    background-image: linear-gradient(to bottom, #0a3ca6 0%, #0a246a 100%);
-}
-.bigbutton {
-    background: transparent;
-    background-image: none;
-    border: none;
-    box-shadow: none;
-    padding: 4px 12px;
-}
-.bigbutton:hover { background-color: rgba(255, 255, 255, 0.2); border-radius: 6px; }
-"""
+def theme_file(theme, filename):
+    path = os.path.join(THEMES_DIR, theme, filename)
+    return path if os.path.exists(path) else os.path.join(THEMES_DIR, "classic", filename)
 
 
 def spawn(argv):
@@ -338,11 +225,12 @@ class StartMenu(Gtk.Window):
             self.set_visual(visual)
         self.set_app_paintable(True)
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
+        self.provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_screen(
-            screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            screen, self.provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+        self.theme = None
+        self.apply_theme()
 
         if GtkLayerShell.is_supported():
             GtkLayerShell.init_for_window(self)
@@ -747,7 +635,19 @@ class StartMenu(Gtk.Window):
 
     # ------------------------------------------------------- show / hide --
 
+    def apply_theme(self):
+        """(Re)load the stylesheet if the user switched themes."""
+        theme = current_theme()
+        if theme == self.theme:
+            return
+        try:
+            self.provider.load_from_path(theme_file(theme, "startmenu.css"))
+            self.theme = theme
+        except GLib.Error as err:
+            print(f"startmenu: bad theme {theme}: {err.message}", file=sys.stderr)
+
     def show_menu(self):
+        self.apply_theme()
         self._close_dialog()
         self._fill_left()
         self.show_main()

@@ -9,6 +9,7 @@ FirefoxOS Control Panel: an XP "classic view" style grid of settings applets.
 """
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from gi.repository import Gio, GLib, Gtk  # noqa: E402
 # (icon, title, description, argv)
 APPLETS = [
     ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["wdisplays"]),
+    ("preferences-desktop-theme", "Appearance", "Classic blue or Modern grey look", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
      ["pcmanfm-qt", "--profile=firefoxos", "--desktop-pref=background"]),
     ("multimedia-volume-control", "Sounds and Audio Devices", "Speakers, microphones and volume", ["pavucontrol"]),
@@ -38,33 +40,37 @@ APPLETS = [
     ("computer", "System", "About this computer", ["@system"]),
 ]
 
-CSS = b"""
-#sidebar {
-    background-image: linear-gradient(to bottom, #7ba2e7 0%, #6375d6 100%);
-    padding: 12px;
-}
-#sidebar .panel {
-    background-color: #d6dff7;
-    border-radius: 4px 4px 0 0;
-    padding: 8px;
-}
-#sidebar .panel-title {
-    font-weight: bold;
-    color: #ffffff;
-    background-image: linear-gradient(to right, #ffffff 0%, #c6d3f7 100%);
-    color: #215dc6;
-    border-radius: 4px 4px 0 0;
-    padding: 4px 8px;
-}
-#sidebar button { color: #215dc6; background: none; border: none; box-shadow: none; }
-#sidebar button:hover label { text-decoration: underline; }
-#content { background-color: #ffffff; }
-#heading { font-size: 18px; font-weight: bold; color: #003399; padding: 12px; }
-flowboxchild { padding: 4px; border-radius: 3px; }
-flowboxchild:hover { background-color: #e8effc; }
-.applet-title { font-weight: bold; }
-.applet-desc { color: #6d6d6d; font-size: smaller; }
-"""
+THEMES_DIR = "/usr/share/firefoxos/themes"
+
+
+def current_theme():
+    for path in (os.path.join(GLib.get_user_config_dir(), "firefoxos", "theme"), "/etc/firefoxos/theme"):
+        try:
+            with open(path) as fh:
+                name = fh.read().strip()
+        except OSError:
+            continue
+        if name and os.path.isdir(os.path.join(THEMES_DIR, name)):
+            return name
+    return "classic"
+
+
+def theme_file(theme, filename):
+    path = os.path.join(THEMES_DIR, theme, filename)
+    return path if os.path.exists(path) else os.path.join(THEMES_DIR, "classic", filename)
+
+
+def read_theme_conf(theme):
+    conf = {}
+    try:
+        with open(os.path.join(THEMES_DIR, theme, "theme.conf")) as fh:
+            for line in fh:
+                if "=" in line:
+                    k, v = line.rstrip("\n").split("=", 1)
+                    conf[k] = v
+    except OSError:
+        pass
+    return conf
 
 
 def spawn(argv):
@@ -204,16 +210,53 @@ class DateTimeDialog(Gtk.Dialog):
         subprocess.run(["timedatectl", "set-ntp", "true" if self.ntp.get_active() else "false"])
 
 
+class AppearanceDialog(Gtk.Dialog):
+    """Pick the desktop theme; the layout stays the same, only the look changes."""
+
+    def __init__(self, parent):
+        super().__init__(title="Appearance", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(380, -1)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        box.pack_start(Gtk.Label(label="Windows, taskbar and Start menu style:", xalign=0), False, False, 0)
+
+        current = current_theme()
+        self.choice = current
+        group = None
+        try:
+            names = sorted(os.listdir(THEMES_DIR), key=lambda n: (n != "classic", n))
+        except OSError:
+            names = ["classic"]
+        for name in names:
+            conf = read_theme_conf(name)
+            radio = Gtk.RadioButton.new_from_widget(group)
+            group = group or radio
+            label = Gtk.Label(xalign=0)
+            label.set_markup(f"<b>{GLib.markup_escape_text(conf.get('NAME', name.title()))}</b>\n"
+                             f"<small>{GLib.markup_escape_text(conf.get('DESCRIPTION', ''))}</small>")
+            radio.add(label)
+            radio.set_active(name == current)
+            radio.connect("toggled", lambda r, n=name: r.get_active() and setattr(self, "choice", n))
+            box.pack_start(radio, False, False, 0)
+        self.show_all()
+
+    def apply(self):
+        subprocess.run(["firefoxos-theme", "set", self.choice])
+
+
 class ControlPanel(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Control Panel")
         self.set_default_size(820, 560)
         self.set_icon_name("preferences-system")
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_screen(self.get_screen(), provider,
+        self.provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_screen(self.get_screen(), self.provider,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.reload_theme()
 
         root = Gtk.Box()
         self.add(root)
@@ -274,6 +317,12 @@ class ControlPanel(Gtk.ApplicationWindow):
         root.pack_start(content, True, True, 0)
         self.show_all()
 
+    def reload_theme(self):
+        try:
+            self.provider.load_from_path(theme_file(current_theme(), "control-panel.css"))
+        except GLib.Error as err:
+            print(f"control-panel: {err.message}", file=sys.stderr)
+
     def _panel(self, title, links):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         t = Gtk.Label(label=title, xalign=0)
@@ -290,7 +339,13 @@ class ControlPanel(Gtk.ApplicationWindow):
         return box
 
     def open_applet(self, argv):
-        if argv == ["@system"]:
+        if argv == ["@appearance"]:
+            dlg = AppearanceDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+                self.reload_theme()
+            dlg.destroy()
+        elif argv == ["@system"]:
             dlg = SystemDialog(self)
             dlg.run()
             dlg.destroy()
@@ -312,12 +367,14 @@ class App(Gtk.Application):
     def do_command_line(self, cmdline):
         args = cmdline.get_arguments()[1:]
         page = args[0] if args else None
-        direct = {"system": ["@system"], "datetime": ["@datetime"], "display": ["wdisplays"]}
+        direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
+                  "display": ["wdisplays"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
             if direct[page][0].startswith("@"):
                 self.hold()
-                cls = SystemDialog if page == "system" else DateTimeDialog
+                cls = {"system": SystemDialog, "datetime": DateTimeDialog,
+                       "appearance": AppearanceDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()

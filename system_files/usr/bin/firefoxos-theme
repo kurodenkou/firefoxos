@@ -1,0 +1,111 @@
+#!/usr/bin/bash
+# firefoxos-theme: switch the desktop between the "classic" (blue/green XP-style)
+# and "modern" (grey, translucent) looks. The layout is identical; only styling
+# changes. Per-user; the choice lives in ~/.config/firefoxos/theme.
+#
+#   firefoxos-theme                 print the current theme
+#   firefoxos-theme list            list available themes
+#   firefoxos-theme set NAME        switch theme and restyle the running desktop
+#   firefoxos-theme path FILE       print the themed file to use for FILE
+#                                   (e.g. waybar.css, mako.conf), falling back
+#                                   to the classic version
+#   firefoxos-theme sync            re-apply the current theme's links (login)
+set -u
+
+THEMES=/usr/share/firefoxos/themes
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+STATE_FILE="$CONF/firefoxos/theme"
+DEFAULT_THEME="$(cat /etc/firefoxos/theme 2>/dev/null || echo classic)"
+
+current() {
+    local t
+    t="$(cat "$STATE_FILE" 2>/dev/null || echo "$DEFAULT_THEME")"
+    [ -d "$THEMES/$t" ] || t=classic
+    echo "$t"
+}
+
+# Read KEY from a theme's theme.conf
+setting() { sed -n "s/^$2=//p" "$THEMES/$1/theme.conf" 2>/dev/null | head -n1; }
+
+path_for() {
+    local t="$1" file="$2"
+    if [ -e "$THEMES/$t/$file" ]; then echo "$THEMES/$t/$file"; else echo "$THEMES/classic/$file"; fi
+}
+
+# labwc reads the window theme named "FirefoxOS"; point the user's copy of that
+# name at the real theme. User theme dirs are searched before /usr/share.
+link_labwc_theme() {
+    local target
+    target="/usr/share/themes/$(setting "$1" LABWC_THEME)"
+    mkdir -p "$DATA/themes"
+    if [ -L "$DATA/themes/FirefoxOS" ] || [ ! -e "$DATA/themes/FirefoxOS" ]; then
+        ln -sfn "$target" "$DATA/themes/FirefoxOS"
+    fi
+}
+
+# Change the wallpaper only if the user is still on one of our defaults
+switch_wallpaper() {
+    local new user_conf cur
+    new="$(setting "$1" WALLPAPER)"
+    [ -n "$new" ] || return 0
+    user_conf="$CONF/pcmanfm-qt/firefoxos/settings.conf"
+    cur="$(sed -n 's/^Wallpaper=//p' "$user_conf" 2>/dev/null | head -n1)"
+    case "$cur" in
+        ""|/usr/share/backgrounds/firefoxos/*) ;;
+        *) return 0 ;;
+    esac
+    pcmanfm-qt --profile=firefoxos --set-wallpaper "$new" >/dev/null 2>&1 || true
+}
+
+restart_detached() {
+    # restart_detached NAME CMD...
+    local name="$1"; shift
+    if pgrep -u "$USER" -x "$name" >/dev/null; then
+        pkill -u "$USER" -x "$name"
+        for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -u "$USER" -x "$name" >/dev/null || break; sleep 0.1; done
+        setsid -f "$@" >/dev/null 2>&1
+    fi
+}
+
+apply_running() {
+    local t="$1"
+    # Window decorations
+    [ -n "${LABWC_PID:-}" ] && labwc --reconfigure 2>/dev/null
+    # Taskbar (unless the user keeps their own style.css)
+    if [ ! -e "$CONF/waybar/style.css" ]; then
+        restart_detached waybar waybar -s "$(path_for "$t" waybar.css)"
+    fi
+    # Notifications
+    if [ ! -e "$CONF/mako/config" ]; then
+        restart_detached mako mako -c "$(path_for "$t" mako.conf)"
+    fi
+    # Start menu picks the new theme up next time it opens
+    switch_wallpaper "$t"
+}
+
+case "${1:-get}" in
+    get) current ;;
+    list) ls -1 "$THEMES" ;;
+    path)
+        [ $# -ge 2 ] || { echo "usage: firefoxos-theme path FILE" >&2; exit 2; }
+        path_for "$(current)" "$2"
+        ;;
+    sync) link_labwc_theme "$(current)" ;;
+    set)
+        t="${2:-}"
+        if [ -z "$t" ] || [ ! -d "$THEMES/$t" ]; then
+            echo "usage: firefoxos-theme set {$(ls -1 "$THEMES" | paste -sd '|')}" >&2
+            exit 2
+        fi
+        mkdir -p "$(dirname "$STATE_FILE")"
+        echo "$t" > "$STATE_FILE"
+        link_labwc_theme "$t"
+        apply_running "$t"
+        echo "Theme set to $t"
+        ;;
+    *)
+        sed -n '2,13s/^# \{0,1\}//p' "$0" >&2
+        exit 2
+        ;;
+esac

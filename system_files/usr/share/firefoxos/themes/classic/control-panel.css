@@ -1,0 +1,25 @@
+#sidebar {
+    background-image: linear-gradient(to bottom, #7ba2e7 0%, #6375d6 100%);
+    padding: 12px;
+}
+#sidebar .panel {
+    background-color: #d6dff7;
+    border-radius: 4px 4px 0 0;
+    padding: 8px;
+}
+#sidebar .panel-title {
+    font-weight: bold;
+    color: #ffffff;
+    background-image: linear-gradient(to right, #ffffff 0%, #c6d3f7 100%);
+    color: #215dc6;
+    border-radius: 4px 4px 0 0;
+    padding: 4px 8px;
+}
+#sidebar button { color: #215dc6; background: none; border: none; box-shadow: none; }
+#sidebar button:hover label { text-decoration: underline; }
+#content { background-color: #ffffff; }
+#heading { font-size: 18px; font-weight: bold; color: #003399; padding: 12px; }
+flowboxchild { padding: 4px; border-radius: 3px; }
+flowboxchild:hover { background-color: #e8effc; }
+.applet-title { font-weight: bold; }
+.applet-desc { color: #6d6d6d; font-size: smaller; }

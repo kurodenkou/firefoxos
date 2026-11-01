@@ -1,0 +1,25 @@
+#sidebar {
+    background-color: #2f2f2f;
+    padding: 12px;
+}
+#sidebar .panel {
+    background-color: #3a3a3a;
+    border-radius: 0 0 6px 6px;
+    padding: 8px;
+}
+#sidebar .panel-title {
+    font-weight: bold;
+    color: #f0f0f0;
+    background-color: #444444;
+    border-radius: 6px 6px 0 0;
+    padding: 4px 8px;
+}
+#sidebar button { color: #d8d8d8; background: none; border: none; box-shadow: none; }
+#sidebar button label { color: #d8d8d8; }
+#sidebar button:hover label { text-decoration: underline; }
+#content { background-color: #ffffff; }
+#heading { font-size: 18px; font-weight: bold; color: #3a3a3a; padding: 12px; }
+flowboxchild { padding: 4px; border-radius: 4px; }
+flowboxchild:hover { background-color: #ececec; }
+.applet-title { font-weight: bold; }
+.applet-desc { color: #6d6d6d; font-size: smaller; }

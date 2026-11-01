@@ -17,7 +17,7 @@
   </placement>
 
   <theme>
-    <name>FirefoxOS-Luna</name>
+    <name>FirefoxOS</name>
     <icon>Papirus</icon>
     <!-- XP layout: app icon on the left, then minimise / maximise / close -->
     <titlebar>

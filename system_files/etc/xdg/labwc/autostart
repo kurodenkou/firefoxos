@@ -1,19 +1,26 @@
 # FirefoxOS session autostart (run by labwc at login).
 # Per-user overrides: ~/.config/labwc/autostart replaces this file.
 
+# Classic or Modern look: see `firefoxos-theme` and Control Panel > Appearance
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+
 # Desktop: wallpaper + My Computer / Recycle Bin icons
 # (~/Desktop etc. must exist before pcmanfm-qt starts)
 xdg-user-dirs-update
 pcmanfm-qt --desktop --profile=firefoxos >/dev/null 2>&1 &
 
-# Taskbar
-waybar >/dev/null 2>&1 &
+# Taskbar (a ~/.config/waybar/style.css of your own wins over the theme)
+if [ -e "$CFG/waybar/style.css" ]; then
+    waybar >/dev/null 2>&1 &
+else
+    waybar -s "$(firefoxos-theme path waybar.css)" >/dev/null 2>&1 &
+fi
 
 # Notifications ("balloon tips")
-if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/mako/config" ]; then
+if [ -f "$CFG/mako/config" ]; then
     mako >/dev/null 2>&1 &
 else
-    mako -c /etc/xdg/mako/config >/dev/null 2>&1 &
+    mako -c "$(firefoxos-theme path mako.conf)" >/dev/null 2>&1 &
 fi
 
 # Notification-area (tray) icons
