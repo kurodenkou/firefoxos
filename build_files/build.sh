@@ -162,4 +162,4 @@ grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="fire
 ### 6. Cleanup
 ### ---------------------------------------------------------------------------
 dnf5 clean all
-rm -rf /var/lib/dnf /var/cache/* /tmp/* || true
+rm -rf /var/lib/dnf /var/cache/* /tmp/* /run/dnf /run/selinux-policy || true

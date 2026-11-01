@@ -2,6 +2,8 @@
 # Per-user overrides: ~/.config/labwc/autostart replaces this file.
 
 # Desktop: wallpaper + My Computer / Recycle Bin icons
+# (~/Desktop etc. must exist before pcmanfm-qt starts)
+xdg-user-dirs-update
 pcmanfm-qt --desktop --profile=firefoxos >/dev/null 2>&1 &
 
 # Taskbar

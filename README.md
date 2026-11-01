@@ -8,13 +8,21 @@ A [Universal Blue](https://universal-blue.org/) image where **websites are the a
 
 Everything (themes, icons, wallpaper, the Start menu) is original work. No Microsoft assets are used.
 
+![Start menu](docs/screenshots/start-menu.png)
+
+| Desktop | All Programs | Log Off |
+|---|---|---|
+| ![Desktop](docs/screenshots/desktop.png) | ![All Programs](docs/screenshots/all-programs.png) | ![Log Off dialog](docs/screenshots/log-off.png) |
+
+<sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
+
 ## What's in the desktop
 
 | Piece | What it is |
 |---|---|
 | Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `FirefoxOS-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
 | Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock |
-| Start menu | `firefoxos-startmenu`: Python + GTK3 + gtk-layer-shell. User picture header, pinned **Internet** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), My Documents / Pictures / Music / Computer, Control Panel, Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
+| Start menu | `firefoxos-startmenu`: Python + GTK3 + gtk-layer-shell. User picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), My Documents / Pictures / Music / Computer, Control Panel, Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus My Computer / Home / Recycle Bin / Network icons |
 | Control Panel | `firefoxos-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, System... |
 | Web Apps | `firefoxos-webapps`: list, open and remove installed PWAs |
@@ -100,7 +108,7 @@ The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_con
 
 ## Customising
 
-System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firefoxos-startmenu` (`PINNED`, `DEFAULT_MFU`).
+System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firefoxos-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 
