@@ -89,3 +89,15 @@ customize-desktop:
         cp -r /etc/xdg/$d ~/.config/$d
         echo "Copied /etc/xdg/$d -> ~/.config/$d"
     done
+
+# Switch the desktop look: "classic" (blue/green) or "modern" (grey, translucent)
+[group('FirefoxOS')]
+theme NAME="":
+    #!/usr/bin/bash
+    if [ -z "{{ NAME }}" ]; then
+        echo "Current theme: $(firefoxos-theme)"
+        echo "Available: $(firefoxos-theme list | paste -sd ' ')"
+        echo "Usage: ujust theme modern"
+    else
+        firefoxos-theme set "{{ NAME }}"
+    fi

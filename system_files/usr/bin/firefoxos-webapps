@@ -54,7 +54,7 @@ class WebApps(Gtk.ApplicationWindow):
         outer.pack_start(body, True, True, 0)
 
         title = Gtk.Label(xalign=0)
-        title.set_markup("<span size='x-large' weight='bold' foreground='#003399'>Web Apps</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Web Apps</span>")
         body.pack_start(title, False, False, 0)
 
         how = Gtk.Label(xalign=0, wrap=True)

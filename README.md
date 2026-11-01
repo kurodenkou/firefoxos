@@ -14,6 +14,20 @@ Everything (themes, icons, wallpaper, the Start menu) is original work. No Micro
 |---|---|---|
 | ![Desktop](docs/screenshots/desktop.png) | ![All Programs](docs/screenshots/all-programs.png) | ![Log Off dialog](docs/screenshots/log-off.png) |
 
+### Classic or Modern
+
+Same layout, two looks. **Classic** is the blue and green one above. **Modern** is grey, flat and translucent:
+
+| Modern Start menu | Modern Turn Off dialog |
+|---|---|
+| ![Modern Start menu](docs/screenshots/modern-start-menu.png) | ![Modern Turn off dialog](docs/screenshots/modern-turn-off.png) |
+
+Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox and web apps (which follow the system colour scheme), and Qt apps like the file manager. Classic switches them back to light.
+
+![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
+
+Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firefoxos-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. To make Modern the default for new users, put `modern` in `/etc/firefoxos/theme`.
+
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
 ## What's in the desktop
@@ -105,10 +119,11 @@ The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_con
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
+| `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
 
 ## Customising
 
-System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firefoxos-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
+Each look's styling lives in `/usr/share/firefoxos/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/FirefoxOS-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Control Panel → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firefoxos-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 
