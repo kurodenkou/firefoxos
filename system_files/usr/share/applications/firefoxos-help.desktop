@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Help and Support
+Exec=firefoxos-open help
+Icon=help-browser
+Categories=System;Documentation;

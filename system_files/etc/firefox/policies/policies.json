@@ -1,0 +1,16 @@
+{
+  "policies": {
+    "DontCheckDefaultBrowser": true,
+    "DisableTelemetry": true,
+    "ExtensionSettings": {
+      "firefoxpwa@filips.si": {
+        "installation_mode": "normal_installed",
+        "install_url": "https://addons.mozilla.org/firefox/downloads/latest/pwas-for-firefox/latest.xpi"
+      }
+    },
+    "Preferences": {
+      "browser.tabs.inTitlebar": { "Value": 0, "Status": "default" },
+      "widget.use-xdg-desktop-portal.file-picker": { "Value": 1, "Status": "default" }
+    }
+  }
+}

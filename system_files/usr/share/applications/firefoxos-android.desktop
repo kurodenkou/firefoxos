@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Android Apps
+Comment=Run Android apps with Waydroid
+Exec=firefoxos-open android
+Icon=waydroid
+Categories=System;Emulator;
+Keywords=android;waydroid;apk;play;

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Control Panel
+Comment=Change FirefoxOS settings
+Exec=firefoxos-control-panel
+Icon=preferences-system
+Categories=Settings;
+Keywords=settings;preferences;system;

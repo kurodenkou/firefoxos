@@ -1,0 +1,338 @@
+#!/usr/bin/python3
+"""
+FirefoxOS Control Panel: an XP "classic view" style grid of settings applets.
+
+    firefoxos-control-panel            open the panel
+    firefoxos-control-panel system     open System Properties directly
+    firefoxos-control-panel datetime   open Date and Time directly
+    firefoxos-control-panel display    open Display directly
+"""
+
+import json
+import platform
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+# (icon, title, description, argv)
+APPLETS = [
+    ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["wdisplays"]),
+    ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
+     ["pcmanfm-qt", "--profile=firefoxos", "--desktop-pref=background"]),
+    ("multimedia-volume-control", "Sounds and Audio Devices", "Speakers, microphones and volume", ["pavucontrol"]),
+    ("preferences-system-network", "Network Connections", "Wi-Fi, Ethernet and VPN", ["nm-connection-editor"]),
+    ("bluetooth", "Bluetooth Devices", "Pair headphones, mice and phones", ["blueman-manager"]),
+    ("printer", "Printers and Faxes", "Add and manage printers", ["system-config-printer"]),
+    ("drive-harddisk", "Disk Management", "Drives, partitions and USB sticks", ["gnome-disks"]),
+    ("applications-internet", "Web Apps", "Install and remove Firefox web apps", ["firefoxos-webapps"]),
+    ("waydroid", "Android Apps", "Waydroid Android container", ["firefoxos-open", "android"]),
+    ("system-software-install", "Add or Remove Programs", "Browse and install Flatpak apps", ["firefoxos-open", "software"]),
+    ("system-software-update", "System Update", "Update FirefoxOS, Flatpaks and toolboxes", ["firefoxos-open", "update"]),
+    ("preferences-system-time", "Date and Time", "Time zone and clock synchronisation", ["@datetime"]),
+    ("system-users", "User Accounts", "Change your password", ["foot", "-T", "Change Password", "--", "passwd"]),
+    ("utilities-system-monitor", "Task Manager", "Running programs and performance", ["firefoxos-open", "task-manager"]),
+    ("computer", "System", "About this computer", ["@system"]),
+]
+
+CSS = b"""
+#sidebar {
+    background-image: linear-gradient(to bottom, #7ba2e7 0%, #6375d6 100%);
+    padding: 12px;
+}
+#sidebar .panel {
+    background-color: #d6dff7;
+    border-radius: 4px 4px 0 0;
+    padding: 8px;
+}
+#sidebar .panel-title {
+    font-weight: bold;
+    color: #ffffff;
+    background-image: linear-gradient(to right, #ffffff 0%, #c6d3f7 100%);
+    color: #215dc6;
+    border-radius: 4px 4px 0 0;
+    padding: 4px 8px;
+}
+#sidebar button { color: #215dc6; background: none; border: none; box-shadow: none; }
+#sidebar button:hover label { text-decoration: underline; }
+#content { background-color: #ffffff; }
+#heading { font-size: 18px; font-weight: bold; color: #003399; padding: 12px; }
+flowboxchild { padding: 4px; border-radius: 3px; }
+flowboxchild:hover { background-color: #e8effc; }
+.applet-title { font-weight: bold; }
+.applet-desc { color: #6d6d6d; font-size: smaller; }
+"""
+
+
+def spawn(argv):
+    try:
+        GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
+    except GLib.Error as err:
+        dlg = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.OK,
+                                text=f"Could not start {argv[0]}")
+        dlg.format_secondary_text(err.message)
+        dlg.run()
+        dlg.destroy()
+
+
+def read_os_release():
+    info = {}
+    for path in ("/etc/os-release", "/usr/lib/os-release"):
+        try:
+            with open(path) as fh:
+                for line in fh:
+                    if "=" in line:
+                        k, v = line.rstrip("\n").split("=", 1)
+                        info[k] = v.strip('"')
+            break
+        except OSError:
+            continue
+    return info
+
+
+def meminfo_gb():
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1024 / 1024
+    except OSError:
+        pass
+    return 0
+
+
+def cpu_name():
+    try:
+        with open("/proc/cpuinfo") as fh:
+            for line in fh:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
+
+
+def run_text(argv):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+class SystemDialog(Gtk.Dialog):
+    def __init__(self, parent):
+        super().__init__(title="System Properties", transient_for=parent, modal=True)
+        self.add_button("OK", Gtk.ResponseType.OK)
+        self.set_default_size(440, 300)
+        box = self.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(16)
+
+        osr = read_os_release()
+        image = ""
+        try:
+            status = json.loads(run_text(["rpm-ostree", "status", "--booted", "--json"]) or "{}")
+            image = status["deployments"][0].get("container-image-reference", "")
+        except (ValueError, KeyError, IndexError):
+            pass
+        rows = [
+            ("System:", osr.get("PRETTY_NAME", "FirefoxOS")),
+            ("Image:", image or "unknown"),
+            ("Kernel:", platform.release()),
+            ("Computer:", cpu_name()),
+            ("Memory:", f"{meminfo_gb():.1f} GB RAM"),
+            ("Computer name:", GLib.get_host_name()),
+        ]
+        top = Gtk.Box(spacing=16)
+        top.pack_start(Gtk.Image.new_from_icon_name("computer", Gtk.IconSize.DIALOG), False, False, 0)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+        for i, (k, v) in enumerate(rows):
+            kl = Gtk.Label(label=k, xalign=1)
+            kl.get_style_context().add_class("dim-label")
+            vl = Gtk.Label(label=v, xalign=0, selectable=True, wrap=True)
+            grid.attach(kl, 0, i, 1, 1)
+            grid.attach(vl, 1, i, 1, 1)
+        top.pack_start(grid, True, True, 0)
+        box.pack_start(top, True, True, 0)
+        self.show_all()
+
+
+class DateTimeDialog(Gtk.Dialog):
+    def __init__(self, parent):
+        super().__init__(title="Date and Time Properties", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(420, 200)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+
+        self.clock = Gtk.Label(xalign=0)
+        self.clock.get_style_context().add_class("title")
+        box.pack_start(self.clock, False, False, 0)
+        self._tick()
+        GLib.timeout_add_seconds(1, self._tick)
+
+        current = run_text(["timedatectl", "show", "-p", "Timezone", "--value"])
+        zones = run_text(["timedatectl", "list-timezones"]).splitlines()
+        self.zone = Gtk.ComboBoxText.new_with_entry()
+        for z in zones:
+            self.zone.append_text(z)
+        self.zone.get_child().set_text(current)
+        row = Gtk.Box(spacing=8)
+        row.pack_start(Gtk.Label(label="Time zone:"), False, False, 0)
+        row.pack_start(self.zone, True, True, 0)
+        box.pack_start(row, False, False, 0)
+
+        ntp = run_text(["timedatectl", "show", "-p", "NTP", "--value"]) == "yes"
+        self.ntp = Gtk.CheckButton(label="Automatically synchronize with an Internet time server")
+        self.ntp.set_active(ntp)
+        box.pack_start(self.ntp, False, False, 0)
+        self.show_all()
+
+    def _tick(self):
+        self.clock.set_text(GLib.DateTime.new_now_local().format("%A, %B %d, %Y   %I:%M:%S %p"))
+        return True
+
+    def apply(self):
+        zone = self.zone.get_child().get_text().strip()
+        if zone:
+            subprocess.run(["timedatectl", "set-timezone", zone])
+        subprocess.run(["timedatectl", "set-ntp", "true" if self.ntp.get_active() else "false"])
+
+
+class ControlPanel(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Control Panel")
+        self.set_default_size(820, 560)
+        self.set_icon_name("preferences-system")
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(self.get_screen(), provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        root = Gtk.Box()
+        self.add(root)
+
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        sidebar.set_name("sidebar")
+        sidebar.set_size_request(200, -1)
+        sidebar.pack_start(self._panel("See Also", [
+            ("Help and Support", ["firefoxos-open", "help"]),
+            ("System Update", ["firefoxos-open", "update"]),
+            ("My Computer", ["firefoxos-open", "computer"]),
+        ]), False, False, 0)
+        root.pack_start(sidebar, False, False, 0)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.set_name("content")
+        heading = Gtk.Label(label="Control Panel", xalign=0)
+        heading.set_name("heading")
+        content.pack_start(heading, False, False, 0)
+
+        flow = Gtk.FlowBox()
+        flow.set_valign(Gtk.Align.START)
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_activate_on_single_click(True)
+        flow.set_max_children_per_line(3)
+        flow.set_min_children_per_line(1)
+        flow.set_column_spacing(8)
+        flow.set_row_spacing(8)
+        flow.set_margin_start(12)
+        flow.set_margin_end(12)
+        self.applets = {}
+        for icon, title, desc, argv in APPLETS:
+            child = Gtk.FlowBoxChild()
+            row = Gtk.Box(spacing=10)
+            row.set_size_request(180, -1)
+            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
+            img.set_pixel_size(40)
+            row.pack_start(img, False, False, 0)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            text.set_valign(Gtk.Align.CENTER)
+            t = Gtk.Label(label=title, xalign=0, wrap=True)
+            t.get_style_context().add_class("applet-title")
+            d = Gtk.Label(label=desc, xalign=0, wrap=True, max_width_chars=26)
+            d.get_style_context().add_class("applet-desc")
+            text.pack_start(t, False, False, 0)
+            text.pack_start(d, False, False, 0)
+            row.pack_start(text, True, True, 0)
+            child.add(row)
+            child.argv = argv
+            child.set_tooltip_text(desc)
+            flow.add(child)
+        flow.connect("child-activated", lambda _f, c: self.open_applet(c.argv))
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.add(flow)
+        content.pack_start(scroller, True, True, 0)
+        root.pack_start(content, True, True, 0)
+        self.show_all()
+
+    def _panel(self, title, links):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        t = Gtk.Label(label=title, xalign=0)
+        t.get_style_context().add_class("panel-title")
+        box.pack_start(t, False, False, 0)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        inner.get_style_context().add_class("panel")
+        for label, argv in links:
+            b = Gtk.Button(label=label)
+            b.get_child().set_xalign(0)
+            b.connect("clicked", lambda _b, a=argv: spawn(a))
+            inner.pack_start(b, False, False, 0)
+        box.pack_start(inner, False, False, 0)
+        return box
+
+    def open_applet(self, argv):
+        if argv == ["@system"]:
+            dlg = SystemDialog(self)
+            dlg.run()
+            dlg.destroy()
+        elif argv == ["@datetime"]:
+            dlg = DateTimeDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
+        else:
+            spawn(argv)
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firefoxos.ControlPanel",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        page = args[0] if args else None
+        direct = {"system": ["@system"], "datetime": ["@datetime"], "display": ["wdisplays"]}
+        if page in direct and self.win is None:
+            # Open just the applet, without the panel window
+            if direct[page][0].startswith("@"):
+                self.hold()
+                cls = SystemDialog if page == "system" else DateTimeDialog
+                dlg = cls(None)
+                if dlg.run() == Gtk.ResponseType.APPLY:
+                    dlg.apply()
+                dlg.destroy()
+                self.release()
+            else:
+                spawn(direct[page])
+            return 0
+        if self.win is None:
+            self.win = ControlPanel(self)
+        self.win.present()
+        if page in direct:
+            self.win.open_applet(direct[page])
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

@@ -1,0 +1,29 @@
+/* "To begin, click your user name" — blue XP-style welcome screen */
+window {
+    background-image: linear-gradient(to bottom,
+        #00309c 0%, #00309c 12%, #f59e47 12.2%, #5a7edc 12.6%,
+        #6f8fe3 50%, #5a7edc 87.4%, #f59e47 87.6%, #00309c 87.8%, #00309c 100%);
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+}
+box#body {
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 10px;
+    padding: 30px 40px;
+}
+label { color: #ffffff; font-size: 15px; }
+entry {
+    border-radius: 4px;
+    border: 1px solid #0831d9;
+    background: #ffffff;
+    color: #000000;
+    padding: 6px;
+}
+button {
+    background-image: linear-gradient(to bottom, #5fbf5f, #2d7f2d);
+    color: #ffffff;
+    border: 1px solid #1e5f1e;
+    border-radius: 4px;
+    font-weight: bold;
+}
+combobox button { background-image: none; background: #ffffff; color: #000000; border-color: #0831d9; }

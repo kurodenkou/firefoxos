@@ -1,0 +1,35 @@
+# FirefoxOS session autostart (run by labwc at login).
+# Per-user overrides: ~/.config/labwc/autostart replaces this file.
+
+# Desktop: wallpaper + My Computer / Recycle Bin icons
+pcmanfm-qt --desktop --profile=firefoxos >/dev/null 2>&1 &
+
+# Taskbar
+waybar >/dev/null 2>&1 &
+
+# Notifications ("balloon tips")
+if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/mako/config" ]; then
+    mako >/dev/null 2>&1 &
+else
+    mako -c /etc/xdg/mako/config >/dev/null 2>&1 &
+fi
+
+# Notification-area (tray) icons
+( sleep 2; nm-applet --indicator ) >/dev/null 2>&1 &
+( sleep 2; blueman-applet ) >/dev/null 2>&1 &
+
+# Password prompts for admin tasks
+/usr/libexec/polkit-mate-authentication-agent-1 >/dev/null 2>&1 &
+
+# Monitor layouts (if the user has a ~/.config/kanshi/config)
+kanshi >/dev/null 2>&1 &
+
+# Screen saver: lock after 10 minutes, blank after 15
+swayidle -w \
+    timeout 600 'firefoxos-open lock' \
+    timeout 900 'wlopm --off \*' \
+    resume 'wlopm --on \*' \
+    before-sleep 'firefoxos-open lock' >/dev/null 2>&1 &
+
+# One-time per-user setup (folders, web app runtime, welcome tip)
+firefoxos-user-setup >/dev/null 2>&1 &

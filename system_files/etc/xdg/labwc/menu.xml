@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu>
+  <!-- Right-click on an empty desktop (fallback when pcmanfm-qt isn't drawing it) -->
+  <menu id="root-menu" label="">
+    <item label="Arrange Icons / Refresh">
+      <action name="Reconfigure" />
+    </item>
+    <separator />
+    <item label="Command Prompt">
+      <action name="Execute" command="foot" />
+    </item>
+    <item label="My Computer">
+      <action name="Execute" command="firefoxos-open computer" />
+    </item>
+    <separator />
+    <item label="Properties">
+      <action name="Execute" command="firefoxos-control-panel display" />
+    </item>
+  </menu>
+</openbox_menu>

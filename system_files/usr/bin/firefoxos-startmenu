@@ -1,0 +1,788 @@
+#!/usr/bin/python3
+"""
+FirefoxOS Start menu.
+
+A two-column start menu in the style of the classic XP layout, drawn as a
+wlr-layer-shell overlay so it sits above every window:
+
+    +------------------------------------------+
+    | [avatar]  User Name                      |  <- blue header
+    +---------------------+--------------------+
+    | Internet  (pinned)  | My Documents       |
+    | Android Apps        | My Pictures        |
+    |---------------------| My Music           |
+    | most-used apps...   | My Computer        |
+    |                     |--------------------|
+    |                     | Control Panel      |
+    |---------------------| Web Apps ...       |
+    |   All Programs  >   | Help / Search / Run|
+    +---------------------+--------------------+
+    |               [Log Off] [Turn Off Computer]  <- blue footer
+    +------------------------------------------+
+
+The process stays resident after the first launch (`--daemon` preloads it at
+login) so the menu opens instantly; running `firefoxos-startmenu` again
+toggles it. Typing while the menu is open searches All Programs.
+"""
+
+import json
+import os
+import pwd
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GtkLayerShell", "0.1")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, GtkLayerShell, Pango  # noqa: E402
+
+APP_ID = "org.firefoxos.StartMenu"
+PANEL_HEIGHT = 30
+STATE_DIR = os.path.join(GLib.get_user_state_dir(), "firefoxos")
+STATE_FILE = os.path.join(STATE_DIR, "startmenu.json")
+MFU_COUNT = 6
+
+# Apps shown in the "most frequently used" list until the user has history.
+DEFAULT_MFU = [
+    "firefoxos-webapps.desktop",
+    "pcmanfm-qt.desktop",
+    "org.xfce.mousepad.desktop",
+    "galculator.desktop",
+    "foot.desktop",
+    "org.xfce.ristretto.desktop",
+]
+
+PINNED = [
+    # (desktop id, title, subtitle)
+    ("firefox.desktop", "Internet", "Mozilla Firefox"),
+    ("firefoxos-android.desktop", "Android Apps", "Waydroid"),
+]
+
+# Desktop entries we never list (helpers, duplicates, ourselves).
+HIDDEN = {
+    "foot-server.desktop",
+    "footclient.desktop",
+    "firefoxos-startmenu.desktop",
+    "pcmanfm-qt-desktop-pref.desktop",
+}
+
+# Freedesktop main categories -> XP-ish folder names, in display order.
+CATEGORIES = [
+    ("Utility", "Accessories", "applications-accessories"),
+    ("Office", "Office", "applications-office"),
+    ("Graphics", "Graphics", "applications-graphics"),
+    ("AudioVideo", "Entertainment", "applications-multimedia"),
+    ("Game", "Games", "applications-games"),
+    ("Network", "Internet", "applications-internet"),
+    ("Development", "Development", "applications-development"),
+    ("Settings", "Settings", "preferences-system"),
+    ("System", "System Tools", "applications-system"),
+]
+
+CSS = b"""
+#overlay { background-color: transparent; }
+#overlay.dim { background-color: rgba(0, 0, 0, 0.45); }
+
+#menu {
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    background-color: #ffffff;
+    border: 1px solid #0831d9;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.45);
+}
+
+#header {
+    border-radius: 7px 7px 0 0;
+    padding: 6px 8px;
+    background-image: linear-gradient(to bottom,
+        #1868ce 0%, #4a8ae8 6%, #1c64d2 14%, #1a5fcf 80%, #1457c4 100%);
+}
+#header label { color: #ffffff; font-size: 15px; font-weight: bold; }
+#avatar {
+    border: 2px solid #ffffff;
+    border-radius: 4px;
+    background-color: #e8eefc;
+}
+
+#orangebar {
+    min-height: 2px;
+    background-image: linear-gradient(to right,
+        rgba(245, 158, 71, 0), #f59e47 50%, rgba(245, 158, 71, 0));
+}
+
+#left { background-color: #ffffff; padding: 4px; }
+#right {
+    background-color: #d3e5fa;
+    border-left: 1px solid #95bdee;
+    padding: 4px;
+}
+#right .item label.title { font-weight: bold; color: #00136b; }
+
+#footer {
+    padding: 4px 6px;
+    background-image: linear-gradient(to bottom,
+        #1457c4 0%, #2a6fd8 10%, #1d64d2 50%, #1a5ac9 90%, #10469f 100%);
+}
+#footer button {
+    color: #ffffff;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+}
+#footer button:hover { background-color: rgba(255, 255, 255, 0.18); border-radius: 3px; }
+#footer button label { color: #ffffff; }
+
+.item {
+    background: transparent;
+    background-image: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 3px 6px;
+    color: #000000;
+}
+.item:hover, .item:focus {
+    background-color: #316ac5;
+    background-image: none;
+}
+.item:hover label, .item:focus label { color: #ffffff; }
+.item label.subtitle { color: #7f7f7f; font-size: 11px; }
+.item label.title.pinned { font-weight: bold; }
+
+separator.menusep {
+    min-height: 1px;
+    margin: 4px 8px;
+    background-image: linear-gradient(to right,
+        rgba(0, 0, 0, 0), #c4c4c4 50%, rgba(0, 0, 0, 0));
+    background-color: transparent;
+}
+#right separator.menusep {
+    background-image: linear-gradient(to right,
+        rgba(149, 189, 238, 0), #95bdee 50%, rgba(149, 189, 238, 0));
+}
+
+#allprograms label { font-weight: bold; }
+#allprograms .arrow {
+    color: #ffffff;
+    background-color: #2fa22f;
+    border-radius: 3px;
+    padding: 0 4px;
+}
+
+#allpage { background-color: #ffffff; }
+#allpage expander title label { font-weight: bold; }
+#allpage expander { padding: 2px 4px; }
+#search { margin: 6px; }
+
+#dialog {
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+    background-color: #ffffff;
+    border: 1px solid #0831d9;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+#dialog-header {
+    border-radius: 7px 7px 0 0;
+    padding: 10px 14px;
+    background-image: linear-gradient(to bottom, #0a246a 0%, #1c4fb6 60%, #0a3ca6 100%);
+}
+#dialog-header label { color: #ffffff; font-size: 15px; font-weight: bold; }
+#dialog-body {
+    padding: 22px 26px;
+    background-image: linear-gradient(to bottom, #5a7edc 0%, #3d63c9 100%);
+}
+#dialog-body label { color: #ffffff; }
+#dialog-footer {
+    border-radius: 0 0 7px 7px;
+    padding: 8px 14px;
+    background-image: linear-gradient(to bottom, #0a3ca6 0%, #0a246a 100%);
+}
+.bigbutton {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    padding: 4px 12px;
+}
+.bigbutton:hover { background-color: rgba(255, 255, 255, 0.2); border-radius: 6px; }
+"""
+
+
+def spawn(argv):
+    """Launch a command fully detached from the menu process."""
+    try:
+        GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
+    except GLib.Error as err:
+        print(f"startmenu: failed to run {argv}: {err.message}", file=sys.stderr)
+
+
+def load_icon(name_or_gicon, size):
+    img = Gtk.Image()
+    if isinstance(name_or_gicon, Gio.Icon):
+        img.set_from_gicon(name_or_gicon, Gtk.IconSize.DIALOG)
+    else:
+        img.set_from_icon_name(name_or_gicon or "application-x-executable", Gtk.IconSize.DIALOG)
+    img.set_pixel_size(size)
+    return img
+
+
+def user_display_name():
+    try:
+        entry = pwd.getpwuid(os.getuid())
+        gecos = entry.pw_gecos.split(",")[0].strip()
+        return gecos or entry.pw_name
+    except KeyError:
+        return GLib.get_user_name()
+
+
+def user_avatar(size):
+    candidates = [
+        os.path.expanduser("~/.face"),
+        os.path.expanduser("~/.face.icon"),
+        f"/var/lib/AccountsService/icons/{GLib.get_user_name()}",
+        "/usr/share/firefoxos/icons/user-default.svg",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+                return Gtk.Image.new_from_pixbuf(pb)
+            except GLib.Error:
+                continue
+    return load_icon("avatar-default", size)
+
+
+class Usage:
+    """Launch counts, used for the most-frequently-used list."""
+
+    def __init__(self):
+        self.counts = {}
+        try:
+            with open(STATE_FILE) as fh:
+                self.counts = json.load(fh).get("counts", {})
+        except (OSError, ValueError):
+            pass
+
+    def bump(self, app_id):
+        self.counts[app_id] = self.counts.get(app_id, 0) + 1
+        try:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            tmp = STATE_FILE + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump({"counts": self.counts}, fh)
+            os.replace(tmp, STATE_FILE)
+        except OSError:
+            pass
+
+    def top(self, n, exclude):
+        ranked = sorted(self.counts.items(), key=lambda kv: -kv[1])
+        out = [app_id for app_id, _ in ranked if app_id not in exclude]
+        for app_id in DEFAULT_MFU:
+            if app_id not in out and app_id not in exclude:
+                out.append(app_id)
+        return out[: n * 2]  # caller drops ids that no longer exist
+
+
+class StartMenu(Gtk.Window):
+    def __init__(self, app):
+        super().__init__(application=app, title="Start")
+        self.app = app
+        self.usage = Usage()
+        self.set_name("overlay")
+        self.set_decorated(False)
+
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+        self.set_app_paintable(True)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        if GtkLayerShell.is_supported():
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_namespace(self, "firefoxos-startmenu")
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+            for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                         GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+                GtkLayerShell.set_anchor(self, edge, True)
+            # Cover the whole output (including the taskbar) so a click
+            # anywhere outside the menu closes it, like the real thing.
+            GtkLayerShell.set_exclusive_zone(self, -1)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        else:
+            self.fullscreen()
+
+        # Click-catcher behind everything
+        catcher = Gtk.EventBox()
+        catcher.set_visible_window(False)
+        catcher.connect("button-press-event", self._on_outside_click)
+        self.add(catcher)
+
+        self.layers = Gtk.Overlay()
+        catcher.add(self.layers)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        spacer.set_vexpand(True)
+        self.layers.add(spacer)
+
+        self.menu = self._build_menu()
+        self.layers.add_overlay(self.menu)
+        self.dialog = None
+
+        self.connect("key-press-event", self._on_key)
+        self.connect("delete-event", self._on_delete)
+
+    # ------------------------------------------------------------------ UI --
+
+    def _swallow(self, widget):
+        """Wrap a widget so clicks on its background don't close the menu."""
+        box = Gtk.EventBox()
+        box.set_visible_window(False)
+        box.connect("button-press-event", lambda *_: True)
+        box.add(widget)
+        return box
+
+    def _build_menu(self):
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        frame.set_name("menu")
+        frame.set_size_request(430, 500)
+
+        outer = self._swallow(frame)
+        outer.set_halign(Gtk.Align.START)
+        outer.set_valign(Gtk.Align.END)
+        outer.set_margin_bottom(PANEL_HEIGHT)
+
+        # Header
+        header = Gtk.Box(spacing=10)
+        header.set_name("header")
+        avatar = user_avatar(48)
+        avatar.set_name("avatar")
+        header.pack_start(avatar, False, False, 0)
+        name = Gtk.Label(label=user_display_name(), xalign=0)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        header.pack_start(name, True, True, 0)
+        frame.pack_start(header, False, False, 0)
+
+        bar = Gtk.Box()
+        bar.set_name("orangebar")
+        frame.pack_start(bar, False, False, 0)
+
+        # Body: stack of the two-column page and the All Programs page
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_transition_duration(120)
+        self.stack.set_vexpand(True)
+        frame.pack_start(self.stack, True, True, 0)
+
+        columns = Gtk.Box(homogeneous=False)
+        self.left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.left.set_name("left")
+        self.left.set_size_request(232, -1)
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        right.set_name("right")
+        columns.pack_start(self.left, True, True, 0)
+        columns.pack_start(right, True, True, 0)
+        self.stack.add_named(columns, "main")
+
+        self._fill_right(right)
+        self._fill_left()
+        self.stack.add_named(self._build_all_page(), "all")
+
+        # Footer
+        footer = Gtk.Box(spacing=4)
+        footer.set_name("footer")
+        footer.pack_end(self._footer_button("system-shutdown", "Turn Off Computer", self._show_power), False, False, 0)
+        footer.pack_end(self._footer_button("system-log-out", "Log Off", self._show_logoff), False, False, 0)
+        frame.pack_start(footer, False, False, 0)
+        return outer
+
+    def _footer_button(self, icon, text, cb):
+        btn = Gtk.Button()
+        box = Gtk.Box(spacing=4)
+        box.pack_start(load_icon(icon, 22), False, False, 0)
+        box.pack_start(Gtk.Label(label=text), False, False, 0)
+        btn.add(box)
+        btn.connect("clicked", lambda *_: cb())
+        return btn
+
+    def _item(self, icon, title, subtitle=None, size=32, pinned=False, on_click=None):
+        btn = Gtk.Button()
+        btn.get_style_context().add_class("item")
+        btn.set_relief(Gtk.ReliefStyle.NONE)
+        row = Gtk.Box(spacing=8)
+        row.pack_start(load_icon(icon, size), False, False, 0)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        labels.set_valign(Gtk.Align.CENTER)
+        t = Gtk.Label(label=title, xalign=0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        t.get_style_context().add_class("title")
+        if pinned:
+            t.get_style_context().add_class("pinned")
+        labels.pack_start(t, False, False, 0)
+        if subtitle:
+            s = Gtk.Label(label=subtitle, xalign=0)
+            s.set_ellipsize(Pango.EllipsizeMode.END)
+            s.get_style_context().add_class("subtitle")
+            labels.pack_start(s, False, False, 0)
+        row.pack_start(labels, True, True, 0)
+        btn.add(row)
+        if on_click:
+            btn.connect("clicked", lambda *_: on_click())
+        return btn
+
+    def _sep(self):
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.get_style_context().add_class("menusep")
+        return sep
+
+    def _app_item(self, info, size=32, title=None, subtitle=None, pinned=False):
+        return self._item(
+            info.get_icon() or "application-x-executable",
+            title or info.get_display_name(),
+            subtitle,
+            size=size,
+            pinned=pinned,
+            on_click=lambda: self.launch(info),
+        )
+
+    def _fill_left(self):
+        for child in self.left.get_children():
+            self.left.remove(child)
+
+        pinned_ids = set()
+        for app_id, title, subtitle in PINNED:
+            info = Gio.DesktopAppInfo.new(app_id)
+            if info is None:
+                continue
+            pinned_ids.add(app_id)
+            self.left.pack_start(self._app_item(info, 32, title, subtitle, pinned=True), False, False, 0)
+
+        self.left.pack_start(self._sep(), False, False, 0)
+
+        shown = 0
+        for app_id in self.usage.top(MFU_COUNT, pinned_ids | HIDDEN):
+            if shown >= MFU_COUNT:
+                break
+            info = Gio.DesktopAppInfo.new(app_id)
+            if info is None or not info.should_show():
+                continue
+            self.left.pack_start(self._app_item(info, 32), False, False, 0)
+            shown += 1
+
+        filler = Gtk.Box()
+        self.left.pack_start(filler, True, True, 0)
+        self.left.pack_start(self._sep(), False, False, 0)
+
+        allbtn = Gtk.Button()
+        allbtn.set_name("allprograms")
+        allbtn.get_style_context().add_class("item")
+        row = Gtk.Box(spacing=8)
+        row.set_halign(Gtk.Align.CENTER)
+        row.pack_start(Gtk.Label(label="All Programs"), False, False, 0)
+        arrow = Gtk.Label(label="▶")
+        arrow.get_style_context().add_class("arrow")
+        row.pack_start(arrow, False, False, 0)
+        allbtn.add(row)
+        allbtn.connect("clicked", lambda *_: self.show_all_programs())
+        self.left.pack_start(allbtn, False, False, 2)
+        self.left.show_all()
+
+    def _fill_right(self, right):
+        def place(icon, title, verb):
+            return self._item(icon, title, size=24, on_click=lambda: self.run_open(verb))
+
+        right.pack_start(place("folder-documents", "My Documents", "documents"), False, False, 0)
+        right.pack_start(place("folder-pictures", "My Pictures", "pictures"), False, False, 0)
+        right.pack_start(place("folder-music", "My Music", "music"), False, False, 0)
+        right.pack_start(place("computer", "My Computer", "computer"), False, False, 0)
+        right.pack_start(place("network-workgroup", "My Network Places", "network"), False, False, 0)
+        right.pack_start(self._sep(), False, False, 0)
+        right.pack_start(self._item("preferences-system", "Control Panel", size=24,
+                                    on_click=lambda: self.run(["firefoxos-control-panel"])), False, False, 0)
+        right.pack_start(self._item("applications-internet", "Web Apps", size=24,
+                                    on_click=lambda: self.run(["firefoxos-webapps"])), False, False, 0)
+        right.pack_start(place("system-software-install", "Add or Remove Programs", "software"), False, False, 0)
+        right.pack_start(place("printer", "Printers and Faxes", "printers"), False, False, 0)
+        right.pack_start(self._sep(), False, False, 0)
+        right.pack_start(place("help-browser", "Help and Support", "help"), False, False, 0)
+        right.pack_start(place("system-search", "Search", "search"), False, False, 0)
+        right.pack_start(place("system-run", "Run...", "run"), False, False, 0)
+
+    def _build_all_page(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        page.set_name("allpage")
+
+        top = Gtk.Box(spacing=4)
+        back = self._item("go-previous", "Back", size=16, on_click=self.show_main)
+        top.pack_start(back, False, False, 0)
+        self.search = Gtk.SearchEntry()
+        self.search.set_name("search")
+        self.search.set_placeholder_text("Search programs")
+        self.search.connect("search-changed", lambda *_: self._populate_all())
+        self.search.connect("activate", self._on_search_activate)
+        top.pack_start(self.search, True, True, 0)
+        page.pack_start(top, False, False, 0)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.all_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        scroller.add(self.all_list)
+        page.pack_start(scroller, True, True, 0)
+        return page
+
+    # ------------------------------------------------------- All Programs --
+
+    def _all_apps(self):
+        apps = []
+        for info in Gio.AppInfo.get_all():
+            if not isinstance(info, Gio.DesktopAppInfo) or not info.should_show():
+                continue
+            if (info.get_id() or "") in HIDDEN:
+                continue
+            apps.append(info)
+        apps.sort(key=lambda i: i.get_display_name().lower())
+        return apps
+
+    @staticmethod
+    def _group_of(info):
+        app_id = info.get_id() or ""
+        if app_id.startswith("FFPWA-"):
+            return "Web Apps"
+        if app_id.startswith("waydroid.") or app_id == "Waydroid.desktop":
+            return "Android Apps"
+        cats = (info.get_categories() or "").split(";")
+        for key, label, _ in CATEGORIES:
+            if key in cats:
+                return label
+        return "Other"
+
+    def _populate_all(self):
+        for child in self.all_list.get_children():
+            self.all_list.remove(child)
+        query = self.search.get_text().strip().lower()
+        apps = self._all_apps()
+        self._matches = []
+
+        if query:
+            for info in apps:
+                hay = " ".join(filter(None, [
+                    info.get_display_name(), info.get_generic_name(),
+                    info.get_description(), " ".join(info.get_keywords() or []),
+                ])).lower()
+                if query in hay:
+                    self._matches.append(info)
+                    self.all_list.pack_start(self._app_item(info, 24), False, False, 0)
+            if not self._matches:
+                self.all_list.pack_start(Gtk.Label(label="No programs match your search."), False, False, 12)
+            self.all_list.show_all()
+            return
+
+        groups = {}
+        for info in apps:
+            groups.setdefault(self._group_of(info), []).append(info)
+        order = ["Web Apps", "Android Apps"] + [c[1] for c in CATEGORIES] + ["Other"]
+        icons = {"Web Apps": "applications-internet", "Android Apps": "waydroid", "Other": "applications-other"}
+        icons.update({label: icon for _, label, icon in CATEGORIES})
+        for name in order:
+            members = groups.get(name)
+            if not members:
+                continue
+            exp = Gtk.Expander()
+            head = Gtk.Box(spacing=6)
+            head.pack_start(load_icon(icons.get(name, "folder"), 20), False, False, 0)
+            head.pack_start(Gtk.Label(label=f"{name}  ({len(members)})"), False, False, 0)
+            exp.set_label_widget(head)
+            exp.set_expanded(name in ("Web Apps", "Android Apps"))
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            inner.set_margin_start(18)
+            for info in members:
+                inner.pack_start(self._app_item(info, 20), False, False, 0)
+            exp.add(inner)
+            self.all_list.pack_start(exp, False, False, 0)
+        self.all_list.show_all()
+
+    def _on_search_activate(self, *_):
+        if getattr(self, "_matches", None):
+            self.launch(self._matches[0])
+
+    def show_all_programs(self, initial_text=None):
+        if initial_text is not None:
+            self.search.set_text(initial_text)
+        self._populate_all()
+        self.stack.set_visible_child_name("all")
+        self.search.grab_focus_without_selecting()
+        self.search.set_position(-1)
+
+    def show_main(self):
+        self.search.set_text("")
+        self.stack.set_visible_child_name("main")
+
+    # -------------------------------------------------------------- dialogs --
+
+    def _dialog(self, title, buttons):
+        """XP-style 'Turn off computer' / 'Log Off' box over a dimmed screen."""
+        self._close_dialog()
+        self.menu.hide()
+        self.get_style_context().add_class("dim")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_name("dialog")
+        box.set_size_request(380, -1)
+
+        header = Gtk.Box()
+        header.set_name("dialog-header")
+        header.pack_start(Gtk.Label(label=title, xalign=0), True, True, 0)
+        box.pack_start(header, False, False, 0)
+
+        body = Gtk.Box(spacing=12, homogeneous=True)
+        body.set_name("dialog-body")
+        for icon, label, cb in buttons:
+            btn = Gtk.Button()
+            btn.get_style_context().add_class("bigbutton")
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            col.pack_start(load_icon(icon, 40), False, False, 0)
+            col.pack_start(Gtk.Label(label=label), False, False, 0)
+            btn.add(col)
+            btn.connect("clicked", lambda _b, fn=cb: fn())
+            body.pack_start(btn, True, True, 0)
+        box.pack_start(body, False, False, 0)
+
+        footer = Gtk.Box()
+        footer.set_name("dialog-footer")
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: self.hide_menu())
+        footer.pack_end(cancel, False, False, 0)
+        box.pack_start(footer, False, False, 0)
+
+        self.dialog = self._swallow(box)
+        self.dialog.set_halign(Gtk.Align.CENTER)
+        self.dialog.set_valign(Gtk.Align.CENTER)
+        self.layers.add_overlay(self.dialog)
+        self.dialog.show_all()
+        cancel.grab_focus()
+
+    def _close_dialog(self):
+        if self.dialog is not None:
+            self.layers.remove(self.dialog)
+            self.dialog.destroy()
+            self.dialog = None
+        self.get_style_context().remove_class("dim")
+
+    def _show_power(self):
+        self._dialog("Turn off computer", [
+            ("system-suspend", "Stand By", lambda: self.run_open("suspend")),
+            ("system-shutdown", "Turn Off", lambda: self.run_open("shutdown")),
+            ("system-reboot", "Restart", lambda: self.run_open("reboot")),
+        ])
+
+    def _show_logoff(self):
+        self._dialog("Log Off FirefoxOS", [
+            ("system-lock-screen", "Lock", lambda: self.run_open("lock")),
+            ("system-log-out", "Log Off", lambda: self.run_open("logoff")),
+        ])
+
+    # -------------------------------------------------------------- actions --
+
+    def launch(self, info):
+        self.hide_menu()
+        ctx = Gdk.Display.get_default().get_app_launch_context()
+        try:
+            info.launch([], ctx)
+            self.usage.bump(info.get_id())
+        except GLib.Error as err:
+            print(f"startmenu: launch failed: {err.message}", file=sys.stderr)
+
+    def run(self, argv):
+        self.hide_menu()
+        spawn(argv)
+
+    def run_open(self, verb):
+        self.run(["firefoxos-open", verb])
+
+    # ------------------------------------------------------- show / hide --
+
+    def show_menu(self):
+        self._close_dialog()
+        self._fill_left()
+        self.show_main()
+        self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.stack.set_visible_child_name("main")
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.menu.show_all()
+        self.show_all()
+        self.present()
+
+    def hide_menu(self):
+        self._close_dialog()
+        self.hide()
+
+    def toggle(self):
+        if self.get_visible():
+            self.hide_menu()
+        else:
+            self.show_menu()
+
+    def _on_outside_click(self, _widget, event):
+        if event.type == Gdk.EventType.BUTTON_PRESS:
+            self.hide_menu()
+        return True
+
+    def _on_delete(self, *_):
+        self.hide_menu()
+        return True
+
+    def _on_key(self, _widget, event):
+        if event.keyval == Gdk.KEY_Escape:
+            if self.dialog is not None:
+                self.hide_menu()
+            elif self.stack.get_visible_child_name() == "all":
+                self.show_main()
+            else:
+                self.hide_menu()
+            return True
+        # Type-to-search from the main page
+        if (self.dialog is None and self.stack.get_visible_child_name() == "main"
+                and not (event.state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK))):
+            ch = Gdk.keyval_to_unicode(event.keyval)
+            if ch and chr(ch).isprintable() and not chr(ch).isspace():
+                self.show_all_programs(chr(ch))
+                return True
+        return False
+
+
+class StartMenuApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        self.hold()  # stay resident so the next open is instant
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        if "--quit" in args:
+            self.quit()
+            return 0
+        if self.window is None:
+            self.window = StartMenu(self)
+        if "--daemon" in args:
+            return 0
+        if "--hide" in args:
+            self.window.hide_menu()
+        else:
+            self.window.toggle()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(StartMenuApp().run(sys.argv))

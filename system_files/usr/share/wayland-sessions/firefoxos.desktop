@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=FirefoxOS
+Comment=The FirefoxOS desktop (labwc)
+Exec=firefoxos-session
+Type=Application
+DesktopNames=labwc;wlroots

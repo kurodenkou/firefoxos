@@ -1,0 +1,108 @@
+// FirefoxOS taskbar. Copy to ~/.config/waybar/ to customise.
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 30,
+    "spacing": 0,
+    "exclusive": true,
+    "modules-left": [
+        "custom/start",
+        "image#ql-desktop",
+        "image#ql-firefox",
+        "image#ql-files",
+        "custom/ql-sep",
+        "wlr/taskbar"
+    ],
+    "modules-center": [],
+    "modules-right": [
+        "tray",
+        "idle_inhibitor",
+        "pulseaudio",
+        "network",
+        "battery",
+        "clock"
+    ],
+
+    "custom/start": {
+        "format": "start",
+        "tooltip": true,
+        "tooltip-format": "Click here to begin.",
+        "on-click": "firefoxos-startmenu"
+    },
+
+    // Quick Launch
+    "image#ql-desktop": {
+        "path": "/usr/share/icons/Papirus/24x24/apps/show-desktop.svg",
+        "size": 18,
+        "tooltip": false,
+        "on-click": "firefoxos-open show-desktop"
+    },
+    "image#ql-firefox": {
+        "path": "/usr/share/icons/Papirus/24x24/apps/firefox.svg",
+        "size": 18,
+        "tooltip": false,
+        "on-click": "firefox"
+    },
+    "image#ql-files": {
+        "path": "/usr/share/icons/Papirus/24x24/apps/system-file-manager.svg",
+        "size": 18,
+        "tooltip": false,
+        "on-click": "firefoxos-open computer"
+    },
+    "custom/ql-sep": {
+        "format": " ",
+        "tooltip": false
+    },
+
+    "wlr/taskbar": {
+        "format": "{icon} {title:.24}",
+        "icon-size": 16,
+        "icon-theme": "Papirus",
+        "tooltip-format": "{title}",
+        "on-click": "minimize-raise",
+        "on-click-middle": "close",
+        "on-click-right": "close",
+        "all-outputs": false
+    },
+
+    "tray": {
+        "icon-size": 16,
+        "spacing": 6
+    },
+    "idle_inhibitor": {
+        "format": "{icon}",
+        "format-icons": { "activated": "", "deactivated": "" },
+        "tooltip-format-activated": "Screen saver disabled",
+        "tooltip-format-deactivated": "Screen saver enabled"
+    },
+    "pulseaudio": {
+        "format": "{icon}",
+        "format-muted": "",
+        "format-icons": { "default": ["", "", ""] },
+        "tooltip-format": "Volume: {volume}%",
+        "on-click": "pavucontrol",
+        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+        "scroll-step": 5
+    },
+    "network": {
+        "format-wifi": "",
+        "format-ethernet": "",
+        "format-disconnected": "",
+        "tooltip-format-wifi": "{essid} ({signalStrength}%)",
+        "tooltip-format-ethernet": "{ifname}: {ipaddr}",
+        "tooltip-format-disconnected": "Network cable unplugged",
+        "on-click": "nm-connection-editor"
+    },
+    "battery": {
+        "format": "{icon}",
+        "format-charging": "",
+        "format-icons": ["", "", "", "", ""],
+        "tooltip-format": "{capacity}% remaining ({timeTo})",
+        "states": { "warning": 20, "critical": 10 }
+    },
+    "clock": {
+        "format": "{:%I:%M %p}",
+        "tooltip-format": "<big>{:%A, %B %d, %Y}</big>\n<tt><small>{calendar}</small></tt>",
+        "on-click": "firefoxos-control-panel datetime"
+    }
+}
