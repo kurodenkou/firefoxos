@@ -1,0 +1,135 @@
+<?xml version="1.0"?>
+<!--
+  FirefoxOS system-wide labwc config.
+  Copy to ~/.config/labwc/rc.xml to customise; see labwc-config(5).
+-->
+<labwc_config>
+
+  <core>
+    <decoration>server</decoration>
+    <gap>0</gap>
+    <adaptiveSync>no</adaptiveSync>
+    <reuseOutputMode>yes</reuseOutputMode>
+  </core>
+
+  <placement>
+    <policy>cascade</policy>
+  </placement>
+
+  <theme>
+    <name>FirefoxOS-Luna</name>
+    <icon>Papirus</icon>
+    <!-- XP layout: app icon on the left, then minimise / maximise / close -->
+    <titlebar>
+      <layout>icon:iconify,max,close</layout>
+      <showTitle>yes</showTitle>
+    </titlebar>
+    <cornerRadius>8</cornerRadius>
+    <dropShadows>yes</dropShadows>
+    <font place="ActiveWindow" name="Tahoma, DejaVu Sans" size="10" weight="bold" />
+    <font place="InactiveWindow" name="Tahoma, DejaVu Sans" size="10" weight="bold" />
+    <font place="MenuHeader" name="Tahoma, DejaVu Sans" size="9" weight="bold" />
+    <font place="MenuItem" name="Tahoma, DejaVu Sans" size="9" />
+    <font place="OnScreenDisplay" name="Tahoma, DejaVu Sans" size="10" />
+  </theme>
+
+  <windowSwitcher preview="yes" outlines="yes">
+    <osd show="yes" style="classic" output="all" />
+    <fields>
+      <field content="icon" width="5%" />
+      <field content="title" width="95%" />
+    </fields>
+  </windowSwitcher>
+
+  <desktops number="1" />
+
+  <snapping>
+    <range inner="10" outer="10" />
+    <overlay enabled="yes" />
+    <topMaximize>yes</topMaximize>
+  </snapping>
+
+  <focus>
+    <followMouse>no</followMouse>
+    <raiseOnFocus>no</raiseOnFocus>
+  </focus>
+
+  <keyboard>
+    <default />
+    <repeatRate>25</repeatRate>
+    <repeatDelay>600</repeatDelay>
+
+    <!-- Tap the Windows/Super key: Start menu -->
+    <keybind key="Super_L" onRelease="yes">
+      <action name="Execute" command="firefoxos-startmenu" />
+    </keybind>
+    <keybind key="C-Escape">
+      <action name="Execute" command="firefoxos-startmenu" />
+    </keybind>
+
+    <!-- XP-era shortcuts -->
+    <keybind key="W-e"><action name="Execute" command="firefoxos-open computer" /></keybind>
+    <keybind key="W-r"><action name="Execute" command="firefoxos-open run" /></keybind>
+    <keybind key="W-f"><action name="Execute" command="firefoxos-open search" /></keybind>
+    <keybind key="W-d"><action name="Execute" command="firefoxos-open show-desktop" /></keybind>
+    <keybind key="W-m"><action name="Execute" command="firefoxos-open show-desktop" /></keybind>
+    <keybind key="W-l"><action name="Execute" command="firefoxos-open lock" /></keybind>
+    <keybind key="W-Pause"><action name="Execute" command="firefoxos-control-panel system" /></keybind>
+    <keybind key="C-A-Delete"><action name="Execute" command="firefoxos-open task-manager" /></keybind>
+    <keybind key="C-S-Escape"><action name="Execute" command="firefoxos-open task-manager" /></keybind>
+    <keybind key="W-Return"><action name="Execute" command="foot" /></keybind>
+    <keybind key="A-F4"><action name="Close" /></keybind>
+    <keybind key="A-space"><action name="ShowMenu" menu="client-menu" atCursor="no" /></keybind>
+
+    <!-- Window snapping (Win7-style, handy on modern screens) -->
+    <keybind key="W-Left"><action name="SnapToEdge" direction="left" combine="yes" /></keybind>
+    <keybind key="W-Right"><action name="SnapToEdge" direction="right" combine="yes" /></keybind>
+    <keybind key="W-Up"><action name="ToggleMaximize" /></keybind>
+    <keybind key="W-Down"><action name="Iconify" /></keybind>
+
+    <!-- Print Screen: save to ~/Pictures, Shift+Print: select a region -->
+    <keybind key="Print"><action name="Execute" command="firefoxos-open screenshot" /></keybind>
+    <keybind key="S-Print"><action name="Execute" command="firefoxos-open screenshot-region" /></keybind>
+
+    <!-- Media / hardware keys -->
+    <keybind key="XF86AudioRaiseVolume"><action name="Execute" command="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+" /></keybind>
+    <keybind key="XF86AudioLowerVolume"><action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" /></keybind>
+    <keybind key="XF86AudioMute"><action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" /></keybind>
+    <keybind key="XF86AudioPlay"><action name="Execute" command="playerctl play-pause" /></keybind>
+    <keybind key="XF86AudioNext"><action name="Execute" command="playerctl next" /></keybind>
+    <keybind key="XF86AudioPrev"><action name="Execute" command="playerctl previous" /></keybind>
+    <keybind key="XF86MonBrightnessUp"><action name="Execute" command="brightnessctl set 5%+" /></keybind>
+    <keybind key="XF86MonBrightnessDown"><action name="Execute" command="brightnessctl set 5%-" /></keybind>
+  </keyboard>
+
+  <mouse>
+    <default />
+    <doubleClickTime>500</doubleClickTime>
+    <!--
+      The desktop itself (icons, wallpaper, right-click menu) is drawn by
+      pcmanfm-qt, so labwc's Root context only matters if it isn't running.
+    -->
+    <context name="Root">
+      <mousebind button="Right" action="Press">
+        <action name="ShowMenu" menu="root-menu" />
+      </mousebind>
+      <mousebind button="Left" action="Press">
+        <action name="None" />
+      </mousebind>
+    </context>
+    <context name="Title">
+      <mousebind button="Left" action="DoubleClick">
+        <action name="ToggleMaximize" />
+      </mousebind>
+    </context>
+  </mouse>
+
+  <libinput>
+    <device category="touchpad">
+      <naturalScroll>no</naturalScroll>
+      <tap>yes</tap>
+      <disableWhileTyping>yes</disableWhileTyping>
+    </device>
+  </libinput>
+
+</labwc_config>

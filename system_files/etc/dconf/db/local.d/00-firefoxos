@@ -1,0 +1,10 @@
+[org/gnome/desktop/interface]
+gtk-theme='adw-gtk3'
+icon-theme='Papirus'
+cursor-theme='Breeze_Light'
+cursor-size=24
+font-name='DejaVu Sans 10'
+color-scheme='prefer-light'
+
+[org/gnome/desktop/wm/preferences]
+button-layout='icon:minimize,maximize,close'

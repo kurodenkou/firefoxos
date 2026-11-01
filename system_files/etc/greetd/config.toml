@@ -1,0 +1,7 @@
+# FirefoxOS login screen: gtkgreet running inside the cage kiosk compositor.
+[terminal]
+vt = 1
+
+[default_session]
+command = "cage -s -m last -- gtkgreet -s /etc/greetd/firefoxos-greeter.css"
+user = "greetd"

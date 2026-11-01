@@ -1,0 +1,152 @@
+#!/usr/bin/python3
+"""
+FirefoxOS Web Apps: lists the web apps installed with PWAsForFirefox
+(firefoxpwa), lets you open or remove them, and walks you through adding new
+ones. The real work is done by the `firefoxpwa` CLI and the Firefox extension.
+"""
+
+import os
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+APPS_DIR = os.path.join(GLib.get_user_data_dir(), "applications")
+RUNTIME = os.path.join(GLib.get_user_data_dir(), "firefoxpwa", "runtime", "firefox")
+HOW_TO = (
+    "<b>To add a web app:</b>\n"
+    "1. Open the site in Firefox.\n"
+    "2. Click the <b>PWAsForFirefox</b> button in the toolbar (puzzle-piece menu if hidden).\n"
+    "3. Choose <b>Install</b>. The app appears here and in Start → All Programs → Web Apps."
+)
+
+
+def spawn(argv):
+    try:
+        GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
+    except GLib.Error as err:
+        print(f"webapps: {err.message}", file=sys.stderr)
+
+
+class WebApps(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Web Apps")
+        self.set_default_size(560, 520)
+        self.set_icon_name("applications-internet")
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add(outer)
+
+        self.infobar = Gtk.InfoBar(message_type=Gtk.MessageType.WARNING)
+        self.infobar.get_content_area().add(Gtk.Label(
+            label="The web app runtime isn't installed yet (it downloads automatically after first login).",
+            wrap=True, xalign=0))
+        self.infobar.add_button("Install now", 1)
+        self.infobar.connect("response", lambda *_: spawn(
+            ["foot", "-T", "Web App Runtime", "--", "sh", "-c",
+             "firefoxpwa runtime install; echo; read -rp 'Press Enter to close' _"]))
+        outer.pack_start(self.infobar, False, False, 0)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        body.set_border_width(14)
+        outer.pack_start(body, True, True, 0)
+
+        title = Gtk.Label(xalign=0)
+        title.set_markup("<span size='x-large' weight='bold' foreground='#003399'>Web Apps</span>")
+        body.pack_start(title, False, False, 0)
+
+        how = Gtk.Label(xalign=0, wrap=True)
+        how.set_markup(HOW_TO)
+        body.pack_start(how, False, False, 0)
+
+        buttons = Gtk.Box(spacing=6)
+        add = Gtk.Button(label="Open Firefox to add a web app")
+        add.connect("clicked", lambda *_: spawn(["firefox"]))
+        buttons.pack_start(add, False, False, 0)
+        body.pack_start(buttons, False, False, 0)
+
+        frame = Gtk.Frame()
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        placeholder = Gtk.Label(label="No web apps installed yet.")
+        placeholder.set_margin_top(24)
+        placeholder.set_margin_bottom(24)
+        placeholder.show()
+        self.listbox.set_placeholder(placeholder)
+        scroller.add(self.listbox)
+        frame.add(scroller)
+        body.pack_start(frame, True, True, 0)
+
+        # Refresh when firefoxpwa adds or removes launchers
+        os.makedirs(APPS_DIR, exist_ok=True)
+        self.monitor = Gio.File.new_for_path(APPS_DIR).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+        self.monitor.connect("changed", lambda *_: GLib.timeout_add(300, self.refresh))
+
+        self.show_all()
+        self.refresh()
+
+    def refresh(self):
+        self.infobar.set_visible(not os.access(RUNTIME, os.X_OK))
+        for row in self.listbox.get_children():
+            self.listbox.remove(row)
+        entries = []
+        try:
+            names = os.listdir(APPS_DIR)
+        except OSError:
+            names = []
+        for name in names:
+            if not (name.startswith("FFPWA-") and name.endswith(".desktop")):
+                continue
+            info = Gio.DesktopAppInfo.new_from_filename(os.path.join(APPS_DIR, name))
+            if info is not None:
+                site_id = name[len("FFPWA-"):-len(".desktop")]
+                entries.append((info, site_id))
+        entries.sort(key=lambda e: e[0].get_display_name().lower())
+
+        for info, site_id in entries:
+            row = Gtk.Box(spacing=10)
+            row.set_border_width(6)
+            img = Gtk.Image.new_from_gicon(info.get_icon() or Gio.ThemedIcon.new("applications-internet"),
+                                           Gtk.IconSize.DND)
+            img.set_pixel_size(32)
+            row.pack_start(img, False, False, 0)
+            labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            name = Gtk.Label(xalign=0)
+            name.set_markup(f"<b>{GLib.markup_escape_text(info.get_display_name())}</b>")
+            labels.pack_start(name, False, False, 0)
+            desc = Gtk.Label(label=info.get_description() or site_id, xalign=0)
+            desc.get_style_context().add_class("dim-label")
+            labels.pack_start(desc, False, False, 0)
+            row.pack_start(labels, True, True, 0)
+
+            open_btn = Gtk.Button(label="Open")
+            open_btn.connect("clicked", lambda _b, i=info: i.launch([], None))
+            row.pack_end(open_btn, False, False, 0)
+            remove = Gtk.Button(label="Remove")
+            remove.connect("clicked", lambda _b, s=site_id: self.remove(s))
+            row.pack_end(remove, False, False, 0)
+            self.listbox.add(row)
+        self.listbox.show_all()
+        return False
+
+    def remove(self, site_id):
+        # Run in a terminal so the user can answer firefoxpwa's confirmation prompts.
+        spawn(["foot", "-T", "Remove Web App", "--", "sh", "-c",
+               f"firefoxpwa site uninstall {GLib.shell_quote(site_id)}; echo; read -rp 'Press Enter to close' _"])
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firefoxos.WebApps")
+
+    def do_activate(self):
+        win = self.get_active_window() or WebApps(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

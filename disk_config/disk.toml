@@ -1,0 +1,10 @@
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "20 GiB"
+
+# A test user for qcow2/raw images (`just build-qcow2`, `just run-vm-qcow2`).
+# Change the password before building anything you'll keep.
+[[customizations.user]]
+name = "xp"
+password = "firefoxos"
+groups = ["wheel"]

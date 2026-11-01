@@ -1,0 +1,10 @@
+# FirefoxOS session environment (labwc reads this before starting).
+# Override per-user in ~/.config/labwc/environment.
+XDG_CURRENT_DESKTOP=labwc:wlroots
+XCURSOR_THEME=Breeze_Light
+XCURSOR_SIZE=24
+QT_QPA_PLATFORM=wayland;xcb
+QT_QPA_PLATFORMTHEME=lxqt
+MOZ_ENABLE_WAYLAND=1
+GTK_IM_MODULE=simple
+_JAVA_AWT_WM_NONREPARENTING=1

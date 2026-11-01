@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+# Entry point for the "FirefoxOS" Wayland session (launched by greetd).
+# labwc reads /etc/xdg/labwc/{environment,rc.xml,menu.xml,autostart}, then
+# the same files from ~/.config/labwc/ if the user has created them.
+
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=FirefoxOS
+export XDG_CURRENT_DESKTOP=labwc:wlroots
+
+# Make sure systemd user services (portals, pipewire, ...) see the session env
+exec labwc "$@"
