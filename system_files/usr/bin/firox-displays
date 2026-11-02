@@ -1,0 +1,258 @@
+#!/usr/bin/python3
+"""
+firox-displays: remember and restore the monitor layout.
+
+    firox-displays save [--quiet]   save the live layout (Control Panel > Display
+                                    runs this when the settings window closes)
+    firox-displays restore          at login: make the screens match the saved
+                                    layout if kanshi didn't (or couldn't)
+
+The layout is stored per set of connected monitors in
+~/.config/firox/displays.json and mirrored into ~/.config/kanshi/config, so
+kanshi also re-applies it on hotplug (laptop alone vs. docked).
+
+Resolutions the panel doesn't advertise (custom modes, e.g. typed into
+wdisplays) are saved as `mode --custom`; the kernel's list of real modes is
+read from /sys/class/drm to tell them apart. `restore` double-checks after
+login and re-applies with wlr-randr, trying the matching real mode first and a
+custom mode second. Everything is logged to ~/.local/state/firox/displays.log.
+
+A user-written ~/.config/kanshi/config (without the Firox header) is left alone.
+"""
+
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+CFG = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+STATE = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+STORE = os.path.join(CFG, "firox", "displays.json")
+KANSHI = os.path.join(CFG, "kanshi", "config")
+LOG = os.path.join(STATE, "firox", "displays.log")
+HEADER = ("# managed by Firox Linux (firox-displays) - edits here are overwritten.\n"
+          "# Remove this header line to manage this file yourself.\n")
+LEGACY_HEADER = "# managed by Firox Linux (firox-display-save)"
+
+
+def log(msg):
+    os.makedirs(os.path.dirname(LOG), exist_ok=True)
+    try:
+        if os.path.getsize(LOG) > 200_000:
+            os.replace(LOG, LOG + ".old")
+    except OSError:
+        pass
+    with open(LOG, "a") as fh:
+        fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+
+
+def notify(title, body=""):
+    if "--quiet" in sys.argv:
+        return
+    subprocess.run(["notify-send", "-a", "Firox", "-i", "preferences-desktop-display", title, body],
+                   check=False, stderr=subprocess.DEVNULL)
+
+
+def outputs():
+    out = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+def kernel_modes(name):
+    """Resolutions the kernel lists for a connector, e.g. {"1920x1080", ...}.
+    None if unknown (virtual outputs have no DRM connector)."""
+    for path in glob.glob(f"/sys/class/drm/card*-{name}/modes"):
+        try:
+            with open(path) as fh:
+                return {line.strip() for line in fh if line.strip()}
+        except OSError:
+            continue
+    return None
+
+
+def snapshot(o):
+    """Structured description of one output's live state."""
+    s = {"name": o["name"], "enabled": bool(o.get("enabled"))}
+    if not s["enabled"]:
+        return s
+    modes = o.get("modes", [])
+    cur = next((m for m in modes if m.get("current")), None)
+    if cur:
+        s.update(width=cur["width"], height=cur["height"], refresh=round(cur["refresh"], 3))
+        km = kernel_modes(o["name"])
+        if km is not None:
+            # Not one of the panel's real modes -> custom (typed-in) mode
+            s["custom"] = f"{cur['width']}x{cur['height']}" not in km
+        else:
+            # No DRM connector info: virtual outputs advertise no preferred mode
+            s["custom"] = not any(m.get("preferred") for m in modes)
+    pos = o.get("position") or {}
+    s.update(x=pos.get("x", 0), y=pos.get("y", 0), scale=o.get("scale") or 1.0,
+             transform=o.get("transform") or "normal")
+    if "adaptive_sync" in o:
+        s["adaptive_sync"] = bool(o["adaptive_sync"])
+    return s
+
+
+def kanshi_line(s):
+    if not s["enabled"]:
+        return f"    output {s['name']} disable"
+    parts = [f"    output {s['name']} enable"]
+    if "width" in s:
+        custom = "--custom " if s.get("custom") else ""
+        parts.append(f"mode {custom}{s['width']}x{s['height']}@{s['refresh']:.3f}Hz")
+    parts.append(f"position {s['x']},{s['y']}")
+    parts.append(f"scale {s['scale']:g}")
+    parts.append(f"transform {s['transform']}")
+    if "adaptive_sync" in s:
+        parts.append(f"adaptive_sync {'on' if s['adaptive_sync'] else 'off'}")
+    return " ".join(parts)
+
+
+def profile_key(outs):
+    return ",".join(sorted(o["name"] for o in outs))
+
+
+def load_store():
+    try:
+        with open(STORE) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    # Older saves stored kanshi lines (strings); they can't be restored
+    # precisely, so drop them - the next save replaces them.
+    return {k: v for k, v in data.items() if v and isinstance(v[0], dict)}
+
+
+def kanshi_is_ours():
+    if not os.path.exists(KANSHI):
+        return True
+    with open(KANSHI) as fh:
+        first = fh.readline()
+    return first.startswith(HEADER.splitlines()[0]) or first.startswith(LEGACY_HEADER)
+
+
+def save():
+    if not kanshi_is_ours():
+        log("save: user-managed kanshi config, not touching it")
+        notify("Display layout not saved",
+               "You have your own ~/.config/kanshi/config, so Firox left it alone.")
+        return 1
+    try:
+        outs = outputs()
+    except (OSError, subprocess.CalledProcessError, ValueError) as err:
+        log(f"save: couldn't read layout: {err}")
+        notify("Display layout not saved", f"Couldn't read the current layout: {err}")
+        return 1
+    if not outs:
+        return 1
+
+    profiles = load_store()
+    key = profile_key(outs)
+    profiles[key] = [snapshot(o) for o in sorted(outs, key=lambda o: o["name"])]
+    log(f"save [{key}]: " + json.dumps(profiles[key]))
+
+    os.makedirs(os.path.dirname(STORE), exist_ok=True)
+    with open(STORE + ".tmp", "w") as fh:
+        json.dump(profiles, fh, indent=1)
+    os.replace(STORE + ".tmp", STORE)
+
+    text = HEADER
+    for i, (k, snaps) in enumerate(sorted(profiles.items())):
+        text += f"\n# monitors: {k}\nprofile firox{i} {{\n" + "\n".join(map(kanshi_line, snaps)) + "\n}\n"
+    os.makedirs(os.path.dirname(KANSHI), exist_ok=True)
+    with open(KANSHI + ".tmp", "w") as fh:
+        fh.write(text)
+    os.replace(KANSHI + ".tmp", KANSHI)
+
+    # kanshi exits at login when it has no config yet, so start it if needed
+    if subprocess.run(["kanshictl", "reload"], check=False, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode != 0:
+        subprocess.Popen(["kanshi"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    notify("Display settings saved", "Your screen layout will be restored at every login.")
+    return 0
+
+
+def matches(s, live):
+    if s["enabled"] != live["enabled"]:
+        return False
+    if not s["enabled"]:
+        return True
+    if "width" in s and (s["width"], s["height"]) != (live.get("width"), live.get("height")):
+        return False
+    if "width" in s and abs(s["refresh"] - live.get("refresh", 0)) > 0.05:
+        return False
+    return (abs(s["scale"] - live["scale"]) < 0.001 and (s["x"], s["y"]) == (live["x"], live["y"])
+            and s["transform"] == live["transform"])
+
+
+def wlr_randr(args):
+    r = subprocess.run(["wlr-randr"] + args, capture_output=True, text=True)
+    log(f"  wlr-randr {' '.join(args)} -> {r.returncode} {r.stderr.strip()}")
+    return r.returncode == 0
+
+
+def restore():
+    if not kanshi_is_ours():
+        return 0
+    try:
+        outs = outputs()
+    except (OSError, subprocess.CalledProcessError, ValueError) as err:
+        log(f"restore: couldn't read layout: {err}")
+        return 1
+    key = profile_key(outs)
+    saved = load_store().get(key)
+    if not saved:
+        log(f"restore [{key}]: nothing saved for this set of monitors")
+        return 0
+    live = {o["name"]: o for o in outs}
+    ok = True
+    for s in saved:
+        o = live.get(s["name"])
+        if o is None:
+            continue
+        cur = snapshot(o)
+        if matches(s, cur):
+            log(f"restore [{key}] {s['name']}: already correct")
+            continue
+        log(f"restore [{key}] {s['name']}: live {json.dumps(cur)} != saved {json.dumps(s)}")
+        if not s["enabled"]:
+            ok &= wlr_randr(["--output", s["name"], "--off"])
+            continue
+        rest = ["--pos", f"{s['x']},{s['y']}", "--scale", f"{s['scale']:g}",
+                "--transform", s["transform"]]
+        base = ["--output", s["name"], "--on"]
+        done = False
+        if "width" in s:
+            # Closest advertised mode first (wlr-randr needs its exact refresh)
+            cands = [m for m in o.get("modes", [])
+                     if (m["width"], m["height"]) == (s["width"], s["height"])
+                     and m["refresh"] > 0]
+            cands.sort(key=lambda m: abs(m["refresh"] - s["refresh"]))
+            if cands and abs(cands[0]["refresh"] - s["refresh"]) <= 0.05 and not s.get("custom"):
+                mode = f"{s['width']}x{s['height']}@{cands[0]['refresh']:.3f}Hz"
+                done = wlr_randr(base + ["--mode", mode] + rest)
+            if not done:
+                mode = f"{s['width']}x{s['height']}@{s['refresh']:.3f}Hz"
+                done = wlr_randr(base + ["--custom-mode", mode] + rest)
+        else:
+            done = wlr_randr(base + rest)
+        ok &= done
+    return 0 if ok else 1
+
+
+def main():
+    cmd = next((a for a in sys.argv[1:] if not a.startswith("-")), "save")
+    if cmd == "save":
+        return save()
+    if cmd == "restore":
+        return restore()
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

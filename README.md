@@ -47,7 +47,7 @@ Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujus
 | Control Panel | `firox-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, System... |
 | Web Apps | `firox-webapps`: list, open and remove installed PWAs |
 | Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
-| Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-display-save` → a kanshi profile per set of connected monitors), so resolution, refresh rate, scale and arrangement survive reboots |
+| Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
 ### Keyboard shortcuts

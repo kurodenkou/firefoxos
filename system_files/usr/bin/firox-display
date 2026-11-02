@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # Display settings: open wdisplays, and when it's closed, save the resulting
 # layout (resolution, refresh rate, scale, position, rotation) so it's
-# restored at the next login. See firox-display-save.
+# restored at the next login. See firox-displays.
 wdisplays "$@"
-exec firox-display-save
+exec firox-displays save
