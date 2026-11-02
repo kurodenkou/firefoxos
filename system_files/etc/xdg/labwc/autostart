@@ -30,8 +30,11 @@ fi
 # Password prompts for admin tasks
 /usr/libexec/polkit-mate-authentication-agent-1 >/dev/null 2>&1 &
 
-# Monitor layouts (if the user has a ~/.config/kanshi/config)
+# Monitor layout saved from Control Panel > Display: kanshi applies it (and
+# re-applies on hotplug); firox-displays then double-checks and fixes
+# anything kanshi couldn't, logging to ~/.local/state/firox/displays.log
 kanshi >/dev/null 2>&1 &
+( sleep 3; firox-displays restore ) >/dev/null 2>&1 &
 
 # Screen saver: lock after 10 minutes, blank after 15
 swayidle -w \
