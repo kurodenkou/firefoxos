@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+# Login screen launcher (run by greetd as the "greetd" user).
+# Styles gtkgreet with the system default look from /etc/firox/theme.
+THEMES=/usr/share/firox/themes
+theme="$(cat /etc/firox/theme 2>/dev/null || echo modern)"
+[ -f "$THEMES/$theme/greeter.css" ] || theme=classic
+case "$theme" in
+    modern) export GTK_THEME=adw-gtk3-dark ;;
+    *)      export GTK_THEME=adw-gtk3 ;;
+esac
+exec cage -d -s -m last -- gtkgreet -s "$THEMES/$theme/greeter.css"

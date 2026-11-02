@@ -21,7 +21,7 @@ from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
 # (icon, title, description, argv)
 APPLETS = [
-    ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["wdisplays"]),
+    ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["firox-display"]),
     ("preferences-desktop-theme", "Appearance", "Classic blue or Modern grey look", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
      ["pcmanfm-qt", "--profile=firox", "--desktop-pref=background"]),
@@ -371,7 +371,7 @@ class App(Gtk.Application):
         args = cmdline.get_arguments()[1:]
         page = args[0] if args else None
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
-                  "display": ["wdisplays"]}
+                  "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
             if direct[page][0].startswith("@"):
