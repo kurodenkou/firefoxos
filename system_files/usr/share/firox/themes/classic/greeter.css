@@ -27,3 +27,27 @@ button {
     font-weight: bold;
 }
 combobox button { background-image: none; background: #ffffff; color: #000000; border-color: #0831d9; }
+
+/* gtkgreet isn't fullscreen under cage, so GTK adds a default title bar
+   ("Greeter" with window buttons). Collapse it. */
+decoration { box-shadow: none; margin: 0; border-radius: 0; }
+headerbar.default-decoration, .titlebar.default-decoration {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+}
+headerbar.default-decoration *, .titlebar.default-decoration * {
+    min-height: 0;
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 0;
+    -gtk-icon-transform: scale(0);
+    opacity: 0;
+}

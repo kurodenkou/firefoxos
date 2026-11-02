@@ -92,6 +92,7 @@ HIDDEN = {
     "firox-startmenu.desktop",
     "pcmanfm-qt-desktop-pref.desktop",
     "org.xfce.mousepad-settings.desktop",
+    "network.cycles.wdisplays.desktop",  # use firox-display, which saves the layout
 }
 
 # Freedesktop main categories -> XP-ish folder names, in display order.

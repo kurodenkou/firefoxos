@@ -1,0 +1,72 @@
+/* Firox Linux "Modern" login screen: the Slate wallpaper with a translucent
+   grey card. Widget names come from gtkgreet: #window, #clock, #body,
+   #input-field, #command-selector. */
+window {
+    background-color: #2b2c2e;
+    background-image: url("file:///usr/share/backgrounds/firox/modern.svg");
+    background-size: cover;
+    background-position: center;
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+}
+#window {
+    background-color: rgba(32, 32, 32, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    padding: 28px 40px 32px 40px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+#clock {
+    color: #f2f2f2;
+    font-size: 40px;
+    font-weight: 300;
+}
+label { color: #e8e8e8; font-size: 14px; }
+entry {
+    color: #f2f2f2;
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-shadow: none;
+}
+entry:focus { border-color: rgba(255, 255, 255, 0.45); }
+combobox button, combobox box {
+    color: #e8e8e8;
+    background-image: none;
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+button {
+    color: #f2f2f2;
+    background-image: none;
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    box-shadow: none;
+    padding: 4px 14px;
+}
+button:hover { background-color: rgba(255, 255, 255, 0.22); }
+
+/* gtkgreet isn't fullscreen under cage, so GTK adds a default title bar
+   ("Greeter" with window buttons). Collapse it. */
+decoration { box-shadow: none; margin: 0; border-radius: 0; }
+headerbar.default-decoration, .titlebar.default-decoration {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+}
+headerbar.default-decoration *, .titlebar.default-decoration * {
+    min-height: 0;
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 0;
+    -gtk-icon-transform: scale(0);
+    opacity: 0;
+}

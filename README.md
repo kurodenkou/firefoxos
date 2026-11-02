@@ -28,6 +28,10 @@ Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox a
 
 ![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
 
+The login screen matches the default look:
+
+![Modern login screen](docs/screenshots/login-modern.png)
+
 Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
@@ -42,7 +46,8 @@ Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujus
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus My Computer / Home / Recycle Bin / Network icons |
 | Control Panel | `firox-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, System... |
 | Web Apps | `firox-webapps`: list, open and remove installed PWAs |
-| Login | greetd + gtkgreet (in cage), XP-style blue welcome screen |
+| Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
+| Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-display-save` → a kanshi profile per set of connected monitors), so resolution, refresh rate, scale and arrangement survive reboots |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
 ### Keyboard shortcuts
