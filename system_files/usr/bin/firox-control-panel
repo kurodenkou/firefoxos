@@ -10,14 +10,17 @@ Firox Linux Control Panel: an XP "classic view" style grid of settings applets.
 
 import json
 import os
+import glob
 import platform
+import pwd
 import subprocess
 import sys
 
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gio, GLib, Gtk  # noqa: E402
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 # (icon, title, description, argv)
 APPLETS = [
@@ -38,7 +41,7 @@ APPLETS = [
     ("system-software-install", "Add or Remove Programs", "Browse and install Flatpak apps", ["firox-open", "software"]),
     ("system-software-update", "System Update", "Update Firox Linux, Flatpaks and toolboxes", ["firox-open", "update"]),
     ("preferences-system-time", "Date and Time", "Time zone and clock synchronisation", ["@datetime"]),
-    ("system-users", "User Accounts", "Change your password", ["foot", "-T", "Change Password", "--", "passwd"]),
+    ("system-users", "User Accounts", "Change your picture or password", ["@accounts"]),
     ("utilities-system-monitor", "Task Manager", "Running programs and performance", ["firox-open", "task-manager"]),
     ("computer", "System", "About this computer", ["@system"]),
 ]
@@ -250,6 +253,135 @@ class AppearanceDialog(Gtk.Dialog):
         subprocess.run(["firox-theme", "set", self.choice])
 
 
+PICTURES_DIR = "/usr/share/firox/pictures"
+FACE = os.path.expanduser("~/.face")
+DEFAULT_FACE = "/usr/share/firox/icons/user-default.svg"
+FACE_SIZE = 256
+
+
+def display_name():
+    try:
+        e = pwd.getpwuid(os.getuid())
+        return e.pw_gecos.split(",")[0].strip() or e.pw_name
+    except KeyError:
+        return GLib.get_user_name()
+
+
+def square_pixbuf(path, size):
+    """Load an image, centre-crop it to a square and scale it to size x size."""
+    if path.lower().endswith(".svg"):
+        return GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+    pb = GdkPixbuf.Pixbuf.new_from_file(path)
+    pb = pb.apply_embedded_orientation() or pb
+    side = min(pb.get_width(), pb.get_height())
+    pb = pb.new_subpixbuf((pb.get_width() - side) // 2, (pb.get_height() - side) // 2, side, side)
+    return pb.scale_simple(size, size, GdkPixbuf.InterpType.HYPER)
+
+
+class AccountsDialog(Gtk.Dialog):
+    """XP-style User Accounts: change your picture (saved to ~/.face, which
+    the Start menu shows) or your password."""
+
+    def __init__(self, parent):
+        super().__init__(title="User Accounts", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.apply_btn = self.add_button("Change Picture", Gtk.ResponseType.APPLY)
+        self.apply_btn.set_sensitive(False)
+        self.set_default_size(520, -1)
+        self.choice = None
+        box = self.get_content_area()
+        box.set_spacing(12)
+        box.set_border_width(16)
+
+        top = Gtk.Box(spacing=14)
+        self.preview = Gtk.Image()
+        self._show_preview(FACE if os.path.isfile(FACE) else DEFAULT_FACE)
+        top.pack_start(self.preview, False, False, 0)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        info.set_valign(Gtk.Align.CENTER)
+        name = Gtk.Label(xalign=0)
+        name.set_markup(f"<span size='large' weight='bold'>{GLib.markup_escape_text(display_name())}</span>")
+        info.pack_start(name, False, False, 0)
+        info.pack_start(Gtk.Label(label="Pick a new picture for your account. It appears in the Start menu.",
+                                  xalign=0, wrap=True, max_width_chars=40), False, False, 0)
+        pw = Gtk.Button(label="Change my password\u2026")
+        pw.set_halign(Gtk.Align.START)
+        pw.connect("clicked", lambda *_: spawn(["foot", "-T", "Change Password", "--", "sh", "-c",
+                                                "passwd; echo; read -r -p 'Press Enter to close' _"]))
+        info.pack_start(pw, False, False, 0)
+        top.pack_start(info, True, True, 0)
+        box.pack_start(top, False, False, 0)
+
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        flow.set_max_children_per_line(5)
+        flow.set_min_children_per_line(5)
+        flow.set_column_spacing(6)
+        flow.set_row_spacing(6)
+        for path in sorted(glob.glob(os.path.join(PICTURES_DIR, "*.svg")) +
+                           glob.glob(os.path.join(PICTURES_DIR, "*.png"))):
+            child = Gtk.FlowBoxChild()
+            try:
+                child.add(Gtk.Image.new_from_pixbuf(square_pixbuf(path, 64)))
+            except GLib.Error:
+                continue
+            child.path = path
+            child.set_tooltip_text(os.path.splitext(os.path.basename(path))[0].title())
+            flow.add(child)
+        flow.connect("child-activated", lambda _f, c: self._choose(c.path))
+        box.pack_start(flow, False, False, 0)
+
+        browse = Gtk.Button(label="Browse for more pictures\u2026")
+        browse.set_halign(Gtk.Align.START)
+        browse.connect("clicked", self._browse)
+        box.pack_start(browse, False, False, 0)
+        self.show_all()
+
+    def _show_preview(self, path):
+        try:
+            self.preview.set_from_pixbuf(square_pixbuf(path, 96))
+        except GLib.Error:
+            self.preview.set_from_icon_name("avatar-default", Gtk.IconSize.DIALOG)
+
+    def _choose(self, path):
+        self.choice = path
+        self._show_preview(path)
+        self.apply_btn.set_sensitive(True)
+
+    def _browse(self, *_):
+        chooser = Gtk.FileChooserDialog(title="Choose a picture", transient_for=self,
+                                        action=Gtk.FileChooserAction.OPEN)
+        chooser.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Open", Gtk.ResponseType.ACCEPT)
+        flt = Gtk.FileFilter()
+        flt.set_name("Pictures")
+        flt.add_pixbuf_formats()
+        chooser.add_filter(flt)
+        pictures = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+        if pictures and os.path.isdir(pictures):
+            chooser.set_current_folder(pictures)
+        if chooser.run() == Gtk.ResponseType.ACCEPT:
+            path = chooser.get_filename()
+            try:
+                square_pixbuf(path, 32)
+                self._choose(path)
+            except GLib.Error as err:
+                msg = Gtk.MessageDialog(transient_for=self, message_type=Gtk.MessageType.ERROR,
+                                        buttons=Gtk.ButtonsType.OK, text="That file isn't a picture Firox can read.")
+                msg.format_secondary_text(err.message)
+                msg.run()
+                msg.destroy()
+        chooser.destroy()
+
+    def apply(self):
+        if not self.choice:
+            return
+        pb = square_pixbuf(self.choice, FACE_SIZE)
+        tmp = FACE + ".tmp"
+        pb.savev(tmp, "png", [], [])
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, FACE)
+
+
 class ControlPanel(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Control Panel")
@@ -348,6 +480,11 @@ class ControlPanel(Gtk.ApplicationWindow):
                 dlg.apply()
                 self.reload_theme()
             dlg.destroy()
+        elif argv == ["@accounts"]:
+            dlg = AccountsDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@system"]:
             dlg = SystemDialog(self)
             dlg.run()
@@ -371,13 +508,14 @@ class App(Gtk.Application):
         args = cmdline.get_arguments()[1:]
         page = args[0] if args else None
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
+                  "accounts": ["@accounts"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
             if direct[page][0].startswith("@"):
                 self.hold()
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
-                       "appearance": AppearanceDialog}[page]
+                       "appearance": AppearanceDialog, "accounts": AccountsDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()

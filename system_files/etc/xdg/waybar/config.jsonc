@@ -23,7 +23,7 @@
     ],
 
     "custom/start": {
-        "format": "start",
+        "format": "firox",
         "tooltip": true,
         "tooltip-format": "Click here to begin.",
         "on-click": "firox-startmenu"

@@ -31,7 +31,7 @@ fi
 if [ ! -f "$STATE/welcomed" ]; then
     touch "$STATE/welcomed"
     ( sleep 4; notify-send -a Firox -i dialog-information "Welcome to Firox Linux" \
-        "Click start to begin. Web Apps and Android Apps live in the Start menu." ) &
+        "Click firox to begin. Web Apps and Android Apps live in the Start menu." ) &
 fi
 
 wait

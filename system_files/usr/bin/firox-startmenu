@@ -164,21 +164,35 @@ def user_display_name():
         return GLib.get_user_name()
 
 
-def user_avatar(size):
-    candidates = [
-        os.path.expanduser("~/.face"),
-        os.path.expanduser("~/.face.icon"),
-        f"/var/lib/AccountsService/icons/{GLib.get_user_name()}",
-        "/usr/share/firox/icons/user-default.svg",
-    ]
-    for path in candidates:
+AVATAR_CANDIDATES = [
+    os.path.expanduser("~/.face"),
+    os.path.expanduser("~/.face.icon"),
+    f"/var/lib/AccountsService/icons/{GLib.get_user_name()}",
+    "/usr/share/firox/icons/user-default.svg",
+]
+
+
+def avatar_stamp():
+    """Changes whenever the user's picture changes (path + mtime)."""
+    for path in AVATAR_CANDIDATES:
+        try:
+            return (path, os.stat(path).st_mtime_ns)
+        except OSError:
+            continue
+    return None
+
+
+def set_avatar(img, size):
+    """Show the user's picture (Control Panel > User Accounts sets ~/.face)."""
+    for path in AVATAR_CANDIDATES:
         if os.path.isfile(path):
             try:
-                pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
-                return Gtk.Image.new_from_pixbuf(pb)
+                img.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True))
+                return
             except GLib.Error:
                 continue
-    return load_icon("avatar-default", size)
+    img.set_from_icon_name("avatar-default", Gtk.IconSize.DIALOG)
+    img.set_pixel_size(size)
 
 
 class Usage:
@@ -292,9 +306,17 @@ class StartMenu(Gtk.Window):
         # Header
         header = Gtk.Box(spacing=10)
         header.set_name("header")
-        avatar = user_avatar(48)
-        avatar.set_name("avatar")
-        header.pack_start(avatar, False, False, 0)
+        # Clicking the picture opens User Accounts (change picture/password)
+        self.avatar = Gtk.Image()
+        self.avatar.set_name("avatar")
+        set_avatar(self.avatar, 48)
+        self.avatar_stamp = avatar_stamp()
+        avatar_btn = Gtk.EventBox()
+        avatar_btn.set_tooltip_text("Change your picture")
+        avatar_btn.add(self.avatar)
+        avatar_btn.connect("button-release-event",
+                           lambda *_: self.run(["firox-control-panel", "accounts"]) or True)
+        header.pack_start(avatar_btn, False, False, 0)
         name = Gtk.Label(label=user_display_name(), xalign=0)
         name.set_ellipsize(Pango.EllipsizeMode.END)
         header.pack_start(name, True, True, 0)
@@ -649,6 +671,9 @@ class StartMenu(Gtk.Window):
 
     def show_menu(self):
         self.apply_theme()
+        if avatar_stamp() != self.avatar_stamp:
+            set_avatar(self.avatar, 48)
+            self.avatar_stamp = avatar_stamp()
         self._close_dialog()
         self._fill_left()
         self.show_main()
