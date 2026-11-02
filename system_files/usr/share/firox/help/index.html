@@ -31,6 +31,7 @@
   <a href="#webapps">Web apps</a>
   <a href="#android">Android apps</a>
   <a href="#sound">No sound?</a>
+  <a href="#nvidia">NVIDIA graphics</a>
   <a href="#software">Installing software</a>
   <a href="#updates">Updates</a>
   <a href="#display">Screen resolution</a>
@@ -59,6 +60,10 @@
   <tr><td><code>ujust reset-waydroid</code></td><td>Remove Android and all its data</td></tr>
 </table>
 <p>Installed Android apps show up in <b>All Programs &rarr; Android Apps</b>. Waydroid needs a GPU it supports. NVIDIA cards with the proprietary driver usually don't work.</p>
+
+<h2 id="nvidia">NVIDIA graphics</h2>
+<p>If your PC has an NVIDIA graphics card (GTX 16 / RTX 20 series or newer), run <code>ujust install-nvidia</code> in a terminal. It switches Firox to a version with NVIDIA's driver built in and keeps your files and settings. Restart afterwards. <code>ujust remove-nvidia</code> switches back.</p>
+<p>If Secure Boot is turned on, run <code>ujust enroll-secure-boot-key</code> before restarting, then choose <b>Enroll MOK</b> on the blue screen at the next boot and enter <code>universalblue</code>.</p>
 
 <h2 id="sound">No sound?</h2>
 <p>First check <b>Control Panel &rarr; Sounds and Audio Devices</b>: make sure the right output is selected and nothing is muted.</p>
