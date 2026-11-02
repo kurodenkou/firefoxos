@@ -29,10 +29,15 @@ install -Dm0644 /dev/stdin /usr/lib/bootc/kargs.d/00-nvidia.toml <<'KARGS'
 kargs = ["rd.driver.blacklist=nouveau", "modprobe.blacklist=nouveau", "nvidia-drm.modeset=1"]
 KARGS
 
-# The dracut change above only takes effect once the initramfs is rebuilt
+# The dracut change above only takes effect once the initramfs is rebuilt.
+# /root links to /var/roothome, which only exists on a booted system;
+# create it for dracut so it doesn't log "installing '/root'" errors.
+roothome_created=0
+if [ ! -e /var/roothome ]; then mkdir -p /var/roothome; roothome_created=1; fi
 /usr/bin/dracut --no-hostonly --kver "${KERNEL}" --reproducible --add ostree \
     -f "/usr/lib/modules/${KERNEL}/initramfs.img"
 chmod 0600 "/usr/lib/modules/${KERNEL}/initramfs.img"
+if [ "${roothome_created}" = 1 ]; then rmdir /var/roothome; fi
 
 # Branding
 sed -i \
