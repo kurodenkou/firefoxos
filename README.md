@@ -1,10 +1,12 @@
-# FirefoxOS
+# Firox Linux
 
-A [Universal Blue](https://universal-blue.org/) image where **websites are the apps**. It's built on Fedora Atomic and uses:
+A desktop Linux built on [Universal Blue](https://universal-blue.org/) (Fedora Atomic): image-based, self-updating, with a familiar classic desktop layout. It includes:
 
-- **Firefox + [PWAsForFirefox](https://pwasforfirefox.filips.si/)** (`firefoxpwa`): install any site as a desktop app with its own window, taskbar button and Start menu entry.
-- **[Waydroid](https://waydro.id/)**: Android apps in a container, integrated into the Start menu.
-- **A custom Wayland desktop laid out like the classic XP desktop**: blue "Luna"-style taskbar, green **start** button, a two-column Start menu, Quick Launch, notification area, desktop icons, and an XP-style login screen.
+- **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **start** button, a two-column Start menu, Quick Launch, notification area, desktop icons and a Control Panel. It comes in two looks: **Modern** (grey and translucent, with dark apps; the default) and **Classic** (blue "Luna"-style with a green start button).
+- **Web apps as first-class apps** with Firefox + [PWAsForFirefox](https://pwasforfirefox.filips.si/) (`firefoxpwa`): install any site as a desktop app with its own window, taskbar button and Start menu entry.
+- **Android apps** with [Waydroid](https://waydro.id/), integrated into the Start menu.
+
+Firox Linux was called **FirefoxOS** in its first versions; see [Upgrading from FirefoxOS](#upgrading-from-firefoxos).
 
 Everything (themes, icons, wallpaper, the Start menu) is original work. No Microsoft assets are used.
 
@@ -26,7 +28,7 @@ Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox a
 
 ![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
 
-Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firefoxos-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firefoxos/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
+Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
@@ -34,12 +36,12 @@ Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujus
 
 | Piece | What it is |
 |---|---|
-| Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `FirefoxOS-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
+| Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `Firox-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
 | Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock |
-| Start menu | `firefoxos-startmenu`: Python + GTK3 + gtk-layer-shell. User picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), My Documents / Pictures / Music / Computer, Control Panel, Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
+| Start menu | `firox-startmenu`: Python + GTK3 + gtk-layer-shell. User picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), My Documents / Pictures / Music / Computer, Control Panel, Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus My Computer / Home / Recycle Bin / Network icons |
-| Control Panel | `firefoxos-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, System... |
-| Web Apps | `firefoxos-webapps`: list, open and remove installed PWAs |
+| Control Panel | `firox-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, System... |
+| Web Apps | `firox-webapps`: list, open and remove installed PWAs |
 | Login | greetd + gtkgreet (in cage), XP-style blue welcome screen |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
@@ -57,8 +59,8 @@ system_files/                 copied onto / in the image
   etc/xdg/waybar/             taskbar layout + Luna CSS
   etc/greetd/                 login screen
   etc/firefox/policies/       auto-installs the PWAsForFirefox extension
-  usr/bin/firefoxos-*         start menu, control panel, web apps, helpers
-  usr/share/themes/FirefoxOS-Luna/   window theme + SVG buttons
+  usr/bin/firox-*         start menu, control panel, web apps, helpers
+  usr/share/themes/Firox-Luna/   window theme + SVG buttons
   usr/share/ublue-os/just/60-custom.just   `ujust` recipes
 disk_config/                  qcow2 / ISO definitions for bootc-image-builder
 Justfile                      local build helpers (from ublue image-template)
@@ -100,7 +102,11 @@ just build-qcow2
 just run-vm-qcow2
 ```
 
-The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_config/disk.toml`).
+The qcow2 image has a test user `xp` with password `firox` (set in `disk_config/disk.toml`).
+
+### Upgrading from FirefoxOS
+
+There's nothing to do: update as usual (`ujust update`, then restart). On your first login afterwards, your theme choice, Start menu history and desktop settings move to their new `firox` locations automatically. The old `firefoxos-*` commands still work as aliases for `firox-*`.
 
 ## After first login
 
@@ -124,11 +130,11 @@ The qcow2 image has a test user `xp` with password `firefoxos` (set in `disk_con
 
 ## Customising
 
-Each look's styling lives in `/usr/share/firefoxos/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/FirefoxOS-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Control Panel → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firefoxos-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
+Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Control Panel → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 
-GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firefoxos` on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
+GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firefoxos` (named after the repository) on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
 
 ## Known limitations
 

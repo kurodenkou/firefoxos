@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Firox Linux
+Comment=The Firox Linux desktop (labwc)
+Exec=firox-session
+Type=Application
+DesktopNames=labwc;wlroots

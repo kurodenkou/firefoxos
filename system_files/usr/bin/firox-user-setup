@@ -1,0 +1,37 @@
+#!/usr/bin/bash
+# Per-user setup, run from the session autostart at every login.
+# Cheap checks only; the slow parts run once.
+set -u
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/firox"
+mkdir -p "$STATE"
+
+# Preload the Start menu so the first click is instant
+firox-startmenu --daemon &
+
+# My Documents / My Pictures / My Music ...
+xdg-user-dirs-update
+
+# Firefox web apps need their own Firefox runtime in ~/.local/share/firefoxpwa.
+# Fetch it in the background the first time (and retry if a previous try failed).
+find "$STATE" -maxdepth 1 -name runtime-installing -mmin +60 -delete 2>/dev/null
+if [ ! -x "$HOME/.local/share/firefoxpwa/runtime/firefox" ] && [ ! -f "$STATE/runtime-installing" ]; then
+    touch "$STATE/runtime-installing"
+    (
+        sleep 20  # let the network come up
+        if firefoxpwa runtime install >"$STATE/runtime-install.log" 2>&1; then
+            notify-send -a Firox -i applications-internet "Web apps are ready" \
+                "Open a site in Firefox and use the PWAsForFirefox toolbar button to install it as an app."
+        fi
+        rm -f "$STATE/runtime-installing"
+    ) &
+fi
+
+# First login: welcome balloon
+if [ ! -f "$STATE/welcomed" ]; then
+    touch "$STATE/welcomed"
+    ( sleep 4; notify-send -a Firox -i dialog-information "Welcome to Firox Linux" \
+        "Click start to begin. Web Apps and Android Apps live in the Start menu." ) &
+fi
+
+wait

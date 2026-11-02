@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Start Menu
+Exec=firox-startmenu
+Icon=start-here
+NoDisplay=true

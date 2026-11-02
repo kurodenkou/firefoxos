@@ -10,11 +10,11 @@
       <action name="Execute" command="foot" />
     </item>
     <item label="My Computer">
-      <action name="Execute" command="firefoxos-open computer" />
+      <action name="Execute" command="firox-open computer" />
     </item>
     <separator />
     <item label="Properties">
-      <action name="Execute" command="firefoxos-control-panel display" />
+      <action name="Execute" command="firox-control-panel display" />
     </item>
   </menu>
 </openbox_menu>

@@ -6,5 +6,5 @@ minsize = "20 GiB"
 # Change the password before building anything you'll keep.
 [[customizations.user]]
 name = "xp"
-password = "firefoxos"
+password = "firox"
 groups = ["wheel"]

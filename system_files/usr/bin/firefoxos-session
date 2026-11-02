@@ -1,14 +1,1 @@
-#!/usr/bin/bash
-# Entry point for the "FirefoxOS" Wayland session (launched by greetd).
-# labwc reads /etc/xdg/labwc/{environment,rc.xml,menu.xml,autostart}, then
-# the same files from ~/.config/labwc/ if the user has created them.
-
-export XDG_SESSION_TYPE=wayland
-export XDG_SESSION_DESKTOP=FirefoxOS
-export XDG_CURRENT_DESKTOP=labwc:wlroots
-
-# Point the "FirefoxOS" window theme at the user's Classic/Modern choice
-# before labwc loads it
-firefoxos-theme sync
-
-exec labwc "$@"
+firox-session

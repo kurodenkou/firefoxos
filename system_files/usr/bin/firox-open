@@ -1,0 +1,89 @@
+#!/usr/bin/bash
+# firox-open VERB — one place for every "open X" action used by the
+# Start menu, taskbar, keybinds and Control Panel.
+set -u
+
+notify() { notify-send -a Firox -i "${3:-dialog-information}" "$1" "${2:-}" 2>/dev/null || true; }
+files() { exec pcmanfm-qt "$@"; }
+dir() { local d; d="$(xdg-user-dir "$1" 2>/dev/null)"; [ -d "$d" ] || d="$HOME"; echo "$d"; }
+terminal() { exec foot -T "$1" -- "${@:2}"; }
+waydroid_ready() { [ -f /var/lib/waydroid/waydroid.cfg ]; }
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+# Themed config for TOOL unless the user has their own
+themed() { # themed FLAG USER_FILE THEME_FILE
+    [ -e "$CFG/$2" ] || printf '%s\n%s\n' "$1" "$(firox-theme path "$3")"
+}
+
+verb="${1:-}"
+shift || true
+
+case "$verb" in
+    # --- places ---------------------------------------------------------
+    computer)   files computer:/// ;;
+    home)       files "$HOME" ;;
+    documents)  files "$(dir DOCUMENTS)" ;;
+    pictures)   files "$(dir PICTURES)" ;;
+    music)      files "$(dir MUSIC)" ;;
+    videos)     files "$(dir VIDEOS)" ;;
+    downloads)  files "$(dir DOWNLOAD)" ;;
+    network)    files network:/// ;;
+    trash)      files trash:/// ;;
+    search)     exec pcmanfm-qt --find-files "$HOME" ;;
+
+    # --- Run... ---------------------------------------------------------
+    run)
+        mapfile -t cfg < <(themed --config fuzzel/fuzzel.ini fuzzel.ini)
+        cmd="$(fuzzel "${cfg[@]}" --prompt-only 'Open: ' --width 50 \
+                --placeholder 'Type a program, folder, file or web address' </dev/null)" || exit 0
+        [ -z "$cmd" ] && exit 0
+        case "$cmd" in
+            http://*|https://*|www.*|*.com|*.org|*.net) exec firefox "$cmd" ;;
+            /*|~*) exec xdg-open "${cmd/#\~/$HOME}" ;;
+            *) exec sh -c "$cmd" ;;
+        esac
+        ;;
+
+    # --- apps / system --------------------------------------------------
+    task-manager) terminal "Task Manager" htop ;;
+    help)       exec firefox "file:///usr/share/firox/help/index.html" ;;
+    printers)   exec system-config-printer ;;
+    software)
+        if flatpak info io.github.kolunmi.Bazaar >/dev/null 2>&1; then
+            exec flatpak run io.github.kolunmi.Bazaar
+        fi
+        terminal "Add or Remove Programs" ujust install-app-store
+        ;;
+    update)     terminal "System Update" ujust update ;;
+    android)
+        if waydroid_ready; then
+            exec waydroid show-full-ui
+        fi
+        terminal "Set up Android Apps" ujust setup-waydroid
+        ;;
+    show-desktop)
+        # Minimise everything (wlr-foreign-toplevel)
+        exec wlrctl toplevel minimize
+        ;;
+    screenshot|screenshot-region)
+        out="$(dir PICTURES)/Screenshot $(date '+%Y-%m-%d %H-%M-%S').png"
+        if [ "$verb" = screenshot-region ]; then
+            geom="$(slurp)" || exit 0
+            grim -g "$geom" "$out"
+        else
+            grim "$out"
+        fi && wl-copy < "$out" && notify "Screenshot saved" "$out" camera-photo
+        ;;
+
+    # --- session --------------------------------------------------------
+    lock)       mapfile -t cfg < <(themed -C swaylock/config swaylock.conf); exec swaylock -f "${cfg[@]}" ;;
+    logoff)     exec labwc --exit ;;
+    suspend)    "$0" lock; exec systemctl suspend ;;
+    shutdown)   exec systemctl poweroff ;;
+    reboot)     exec systemctl reboot ;;
+
+    *)
+        echo "usage: firox-open {computer|home|documents|pictures|music|videos|downloads|network|trash|search|run|"\
+"task-manager|help|printers|software|update|android|show-desktop|screenshot|screenshot-region|lock|logoff|suspend|shutdown|reboot}" >&2
+        exit 2
+        ;;
+esac

@@ -1,4 +1,4 @@
-// FirefoxOS taskbar. Copy to ~/.config/waybar/ to customise.
+// Firox Linux taskbar. Copy to ~/.config/waybar/ to customise.
 {
     "layer": "top",
     "position": "bottom",
@@ -26,7 +26,7 @@
         "format": "start",
         "tooltip": true,
         "tooltip-format": "Click here to begin.",
-        "on-click": "firefoxos-startmenu"
+        "on-click": "firox-startmenu"
     },
 
     // Quick Launch
@@ -34,7 +34,7 @@
         "path": "/usr/share/icons/Papirus/24x24/apps/show-desktop.svg",
         "size": 18,
         "tooltip": false,
-        "on-click": "firefoxos-open show-desktop"
+        "on-click": "firox-open show-desktop"
     },
     "image#ql-firefox": {
         "path": "/usr/share/icons/Papirus/24x24/apps/firefox.svg",
@@ -46,7 +46,7 @@
         "path": "/usr/share/icons/Papirus/24x24/apps/system-file-manager.svg",
         "size": 18,
         "tooltip": false,
-        "on-click": "firefoxos-open computer"
+        "on-click": "firox-open computer"
     },
     "custom/ql-sep": {
         "format": " ",
@@ -93,6 +93,6 @@
     "clock": {
         "format": "{:%I:%M %p}",
         "tooltip-format": "<big>{:%A, %B %d, %Y}</big>\n<tt><small>{calendar}</small></tt>",
-        "on-click": "firefoxos-control-panel datetime"
+        "on-click": "firox-control-panel datetime"
     }
 }

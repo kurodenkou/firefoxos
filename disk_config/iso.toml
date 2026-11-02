@@ -1,5 +1,5 @@
 # Anaconda installer ISO.
-# FirefoxOS has no GNOME/KDE initial-setup wizard, so the installer itself
+# Firox Linux has no GNOME/KDE initial-setup wizard, so the installer itself
 # creates the first user, sets the timezone and configures the network.
 [customizations.installer.kickstart]
 contents = """

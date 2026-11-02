@@ -1,0 +1,80 @@
+# Firox-Luna: a labwc/openbox theme in the spirit of the classic blue
+# "Luna" XP look. Original artwork; buttons are the SVGs next to this file.
+
+border.width: 3
+window.titlebar.padding.width: 5
+window.titlebar.padding.height: 3
+
+window.active.border.color: #0831d9
+window.inactive.border.color: #7b97e0
+
+window.active.title.bg: Gradient SplitVertical
+window.active.title.bg.color.splitTo: #3d95ff
+window.active.title.bg.color: #0a61f0
+window.active.title.bg.colorTo: #0055e5
+window.active.title.bg.colorTo.splitTo: #003ccf
+
+window.inactive.title.bg: Gradient SplitVertical
+window.inactive.title.bg.color.splitTo: #a8c2f5
+window.inactive.title.bg.color: #7d9be4
+window.inactive.title.bg.colorTo: #7593df
+window.inactive.title.bg.colorTo.splitTo: #6a87d6
+
+window.active.label.text.color: #ffffff
+window.inactive.label.text.color: #d8e4f8
+window.label.text.justify: left
+
+window.button.width: 21
+window.button.height: 21
+window.button.spacing: 2
+window.button.hover.bg.color: #ffffff00
+window.button.hover.bg.corner-radius: 3
+
+window.active.button.unpressed.image.color: #ffffff
+window.inactive.button.unpressed.image.color: #ffffff
+
+window.active.shadow.size: 18
+window.inactive.shadow.size: 12
+window.active.shadow.color: #00000050
+window.inactive.shadow.color: #00000030
+
+# Menus (window menu, desktop right-click): white with the XP blue highlight
+menu.overlap.x: -2
+menu.overlap.y: 0
+menu.width.min: 140
+menu.width.max: 320
+menu.border.width: 1
+menu.border.color: #7f9db9
+menu.items.bg.color: #ffffff
+menu.items.text.color: #000000
+menu.items.active.bg.color: #316ac5
+menu.items.active.text.color: #ffffff
+menu.items.padding.x: 10
+menu.items.padding.y: 4
+menu.separator.width: 1
+menu.separator.padding.width: 4
+menu.separator.padding.height: 3
+menu.separator.color: #aca899
+menu.title.bg.color: #0a61f0
+menu.title.text.color: #ffffff
+menu.title.text.justify: Left
+
+# Alt+Tab switcher
+osd.bg.color: #ece9d8
+osd.border.color: #0831d9
+osd.border.width: 2
+osd.label.text.color: #000000
+osd.window-switcher.style-classic.width: 480
+osd.window-switcher.style-classic.padding: 6
+osd.window-switcher.style-classic.item.padding.x: 10
+osd.window-switcher.style-classic.item.padding.y: 3
+osd.window-switcher.style-classic.item.active.border.width: 2
+osd.window-switcher.style-classic.item.active.border.color: #316ac5
+osd.window-switcher.style-classic.item.active.bg.color: #c1d2ee
+osd.window-switcher.preview.border.width: 2
+osd.window-switcher.preview.border.color: #316ac5,#ffffff,#316ac5
+
+snapping.overlay.region.bg.color: #316ac560
+snapping.overlay.edge.bg.color: #316ac560
+snapping.overlay.region.border.color: #316ac5
+snapping.overlay.edge.border.color: #316ac5

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Web Apps
+Comment=Install and manage Firefox web apps
+Exec=firox-webapps
+Icon=applications-internet
+Categories=Network;WebBrowser;
+Keywords=pwa;web;app;firefoxpwa;install;
