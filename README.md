@@ -93,6 +93,15 @@ just build-iso ghcr.io/kurodenkou/firox latest
 
 The installer creates your user account. There's no separate setup wizard.
 
+### NVIDIA graphics
+
+There's a second image, **`ghcr.io/kurodenkou/firox-nvidia-open`**, with NVIDIA's driver built in. It uses Universal Blue's prebuilt, signed open kernel modules, matched to the image's kernel at build time. It supports GTX 16-series / RTX 20-series and newer cards.
+
+- **On an installed system:** run `ujust install-nvidia`. It checks your card, switches to the NVIDIA image and keeps your files and settings. `ujust remove-nvidia` switches back.
+- **Secure Boot:** run `ujust enroll-secure-boot-key` before restarting, then choose **Enroll MOK** at the next boot (password `universalblue`).
+- **Fresh install:** build the ISO from the NVIDIA image: `just build-nvidia`, then `just build-iso localhost/firox-nvidia-open`.
+- **Waydroid** uses software rendering on NVIDIA (`ujust setup-waydroid` configures that automatically). NVIDIA's driver doesn't support Waydroid's GPU path.
+
 ### Try it in a VM
 
 ```bash
@@ -138,6 +147,7 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
 | `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
+| `ujust install-nvidia` / `ujust remove-nvidia` | Switch to / from the image with NVIDIA drivers |
 
 ## Customising
 
@@ -145,10 +155,11 @@ Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskba
 
 ## Building and signing
 
-GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
+GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` and `ghcr.io/<owner>/firox-nvidia-open` on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
 
 ## Known limitations
 
-- Waydroid needs a GPU it supports (Intel/AMD are fine; NVIDIA's proprietary driver generally isn't) and doesn't work on Secure Boot setups that block the binder module from loading.
+- Waydroid needs a GPU it supports for hardware acceleration (Intel/AMD are fine; on NVIDIA it runs with software rendering) and doesn't work on Secure Boot setups that block the binder module from loading.
+- The NVIDIA image only supports cards from the GTX 16 / RTX 20 series onwards (NVIDIA's open driver).
 - The PWAsForFirefox extension is installed by Firefox policy on first launch, so Firefox needs network access the first time.
 - The Start menu, Control Panel and Web Apps manager are new code and haven't been tested much on real hardware yet.

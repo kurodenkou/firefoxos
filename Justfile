@@ -99,6 +99,12 @@ build $target_image=image_name $tag=default_tag:
     set -euox pipefail
 
     BUILD_ARGS=()
+    # Variant settings (set by `just build-nvidia`)
+    for var in BASE_IMAGE AKMODS_IMAGE FIROX_VARIANT; do
+        if [[ -n "${!var:-}" ]]; then
+            BUILD_ARGS+=("--build-arg" "${var}=${!var}")
+        fi
+    done
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -125,6 +131,24 @@ build $target_image=image_name $tag=default_tag:
     PODMAN_BUILD_ARGS=("${BUILD_ARGS[@]}" "${LABELS[@]}" --pull=newer --tag "${target_image}:${tag}" --file Containerfile)
 
     podman build "${PODMAN_BUILD_ARGS[@]}" .
+
+# Build the NVIDIA variant (firox-nvidia-open): Universal Blue's prebuilt,
+# signed open NVIDIA modules for the base image's exact kernel.
+# Example: just build-nvidia
+build-nvidia $target_image=(image_name + "-nvidia-open") $tag=default_tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="ghcr.io/ublue-os/base-main:latest"
+    podman pull -q "${base}" >/dev/null
+    read -r kver digest < <(podman image inspect "${base}" | python3 -c 'import json,sys; i=json.load(sys.stdin)[0]; print(i["Labels"]["ostree.linux"], i["Digest"])')
+    fedora="$(sed -E 's/.*\.fc([0-9]+)\..*/\1/' <<< "${kver}")"
+    # Pin the exact base that was inspected, so kernel and modules can't drift
+    export BASE_IMAGE="ghcr.io/ublue-os/base-main@${digest}"
+    export AKMODS_IMAGE="ghcr.io/ublue-os/akmods-nvidia-open:main-${fedora}-${kver%.x86_64}"
+    export FIROX_VARIANT=nvidia
+    echo "Base:   ${BASE_IMAGE} (kernel ${kver})"
+    echo "Akmods: ${AKMODS_IMAGE}"
+    just build "${target_image}" "${tag}"
 
 # Split the image for smaller updates (New)!
 rechunk $target_image=image_name $tag=default_tag:

@@ -160,7 +160,14 @@ sed -i \
 grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="firox"' >> /usr/lib/os-release
 
 ### ---------------------------------------------------------------------------
-### 6. Cleanup
+### 6. NVIDIA variant (firox-nvidia-open)
+### ---------------------------------------------------------------------------
+if [ "${FIROX_VARIANT:-main}" = nvidia ]; then
+    /ctx/nvidia.sh
+fi
+
+### ---------------------------------------------------------------------------
+### 7. Cleanup
 ### ---------------------------------------------------------------------------
 dnf5 clean all
 rm -rf /var/lib/dnf /var/cache/* /tmp/* /run/dnf /run/selinux-policy || true

@@ -20,6 +20,13 @@ setup-waydroid TYPE="vanilla":
         sudo firewall-cmd --zone=trusted --add-port=53/udp --add-port=67/udp --permanent
         sudo firewall-cmd --reload
     fi
+    if [ -e /proc/driver/nvidia/version ]; then
+        # Waydroid's GPU acceleration doesn't work with NVIDIA's driver:
+        # use software rendering instead
+        echo "NVIDIA driver detected: using software rendering for Android."
+        printf 'ro.hardware.gralloc=default\nro.hardware.egl=swiftshader\n' \
+            | sudo tee -a /var/lib/waydroid/waydroid_base.prop >/dev/null
+    fi
     sudo systemctl restart waydroid-container.service
     echo
     echo "Waydroid is ready. Open Start -> Android Apps."
@@ -137,3 +144,54 @@ fix-realtek-audio *ARGS:
     echo "Firox Linux: ignore the /tmp path above. To undo later, use:"
     echo "  ujust fix-realtek-audio --restore     (put mixer settings back)"
     echo "  ujust fix-realtek-audio --uninstall   (stop re-applying at boot)"
+
+# Switch to the Firox image with NVIDIA drivers (GTX 16xx / RTX 20xx and newer)
+[group('Firox Linux')]
+install-nvidia:
+    #!/usr/bin/bash
+    set -euo pipefail
+    if ! lspci -nn | grep -Eiq '(VGA compatible|3D|Display) controller.*NVIDIA'; then
+        echo "No NVIDIA graphics card found, nothing to do."
+        exit 1
+    fi
+    # Same check as Universal Blue: GK/GM/GP/GV chips (Kepler..Volta,
+    # GTX 10-series and older) aren't supported by the open driver
+    if lspci -nn | grep -Pq "(VGA compatible|3D) controller .+G(K|M|P|V)\d{3}"; then
+        echo "This NVIDIA card is older than the GTX 16 / RTX 20 series."
+        echo "Firox's NVIDIA image uses NVIDIA's open driver, which doesn't support it."
+        exit 1
+    fi
+    current="$(sudo bootc status --format json | jq -r '.status.booted.image.image.image')"
+    case "${current}" in
+        *-nvidia-open:*|*-nvidia-open) echo "Already on the NVIDIA image (${current})."; exit 0 ;;
+    esac
+    repo="${current%:*}"; tag="${current##*:}"
+    [ "${repo}" = "${current}" ] && tag=latest
+    target="${repo}-nvidia-open:${tag}"
+    echo "This switches Firox to ${target},"
+    echo "which includes NVIDIA's driver. Your files and settings are kept."
+    echo "Android apps (Waydroid) will use software rendering on NVIDIA."
+    read -rp "Continue? [y/N] " ans
+    [[ "${ans,,}" == y* ]] || exit 0
+    sudo bootc switch "${target}"
+    echo
+    if mokutil --sb-state 2>/dev/null | grep -q enabled; then
+        echo "Secure Boot is on. Before restarting, run:  ujust enroll-secure-boot-key"
+        echo "then pick 'Enroll MOK' in the blue screen at the next boot (password: universalblue)."
+    fi
+    echo "Restart to start using the NVIDIA driver:  systemctl reboot"
+
+# Switch back from the NVIDIA image to the standard Firox image
+[group('Firox Linux')]
+remove-nvidia:
+    #!/usr/bin/bash
+    set -euo pipefail
+    current="$(sudo bootc status --format json | jq -r '.status.booted.image.image.image')"
+    case "${current}" in
+        *-nvidia-open:*) target="${current/-nvidia-open:/:}" ;;
+        *) echo "Not on the NVIDIA image (${current}), nothing to do."; exit 0 ;;
+    esac
+    read -rp "Switch to ${target}? [y/N] " ans
+    [[ "${ans,,}" == y* ]] || exit 0
+    sudo bootc switch "${target}"
+    echo "Restart to finish:  systemctl reboot"
