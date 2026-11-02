@@ -1,0 +1,32 @@
+#!/usr/bin/bash
+# Entry point for the "Firox Linux" Wayland session (launched by greetd).
+# labwc reads /etc/xdg/labwc/{environment,rc.xml,menu.xml,autostart}, then
+# the same files from ~/.config/labwc/ if the user has created them.
+
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=Firox
+export XDG_CURRENT_DESKTOP=labwc:wlroots
+
+# One-time move of per-user settings from the FirefoxOS name (renamed to
+# Firox Linux): theme choice, Start menu history, desktop/wallpaper profile.
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+migrate() { if [ -e "$1" ] && [ ! -e "$2" ]; then mkdir -p "$(dirname "$2")" && mv "$1" "$2"; fi; }
+migrate "$CFG/firefoxos" "$CFG/firox"
+migrate "$STATE/firefoxos" "$STATE/firox"
+migrate "$CFG/pcmanfm-qt/firefoxos" "$CFG/pcmanfm-qt/firox"
+if [ -f "$CFG/pcmanfm-qt/firox/settings.conf" ]; then
+    sed -i 's|/usr/share/backgrounds/firefoxos/|/usr/share/backgrounds/firox/|' "$CFG/pcmanfm-qt/firox/settings.conf"
+fi
+[ -L "$DATA/themes/FirefoxOS" ] && rm -f "$DATA/themes/FirefoxOS"
+# A personal rc.xml copied from the old defaults names the old window theme
+if [ -f "$CFG/labwc/rc.xml" ]; then
+    sed -i 's|<name>FirefoxOS</name>|<name>Firox</name>|' "$CFG/labwc/rc.xml"
+fi
+
+# Point the "Firox" window theme at the user's Classic/Modern choice
+# before labwc loads it
+firox-theme sync
+
+exec labwc "$@"

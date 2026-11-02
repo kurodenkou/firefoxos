@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Control Panel
+Comment=Change Firox Linux settings
+Exec=firox-control-panel
+Icon=preferences-system
+Categories=Settings;
+Keywords=settings;preferences;system;

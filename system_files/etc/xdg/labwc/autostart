@@ -1,26 +1,26 @@
-# FirefoxOS session autostart (run by labwc at login).
+# Firox Linux session autostart (run by labwc at login).
 # Per-user overrides: ~/.config/labwc/autostart replaces this file.
 
-# Classic or Modern look: see `firefoxos-theme` and Control Panel > Appearance
+# Classic or Modern look: see `firox-theme` and Control Panel > Appearance
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 # Desktop: wallpaper + My Computer / Recycle Bin icons
 # (~/Desktop etc. must exist before pcmanfm-qt starts)
 xdg-user-dirs-update
-pcmanfm-qt --desktop --profile=firefoxos >/dev/null 2>&1 &
+pcmanfm-qt --desktop --profile=firox >/dev/null 2>&1 &
 
 # Taskbar (a ~/.config/waybar/style.css of your own wins over the theme)
 if [ -e "$CFG/waybar/style.css" ]; then
     waybar >/dev/null 2>&1 &
 else
-    waybar -s "$(firefoxos-theme path waybar.css)" >/dev/null 2>&1 &
+    waybar -s "$(firox-theme path waybar.css)" >/dev/null 2>&1 &
 fi
 
 # Notifications ("balloon tips")
 if [ -f "$CFG/mako/config" ]; then
     mako >/dev/null 2>&1 &
 else
-    mako -c "$(firefoxos-theme path mako.conf)" >/dev/null 2>&1 &
+    mako -c "$(firox-theme path mako.conf)" >/dev/null 2>&1 &
 fi
 
 # Notification-area (tray) icons
@@ -35,10 +35,10 @@ kanshi >/dev/null 2>&1 &
 
 # Screen saver: lock after 10 minutes, blank after 15
 swayidle -w \
-    timeout 600 'firefoxos-open lock' \
+    timeout 600 'firox-open lock' \
     timeout 900 'wlopm --off \*' \
     resume 'wlopm --on \*' \
-    before-sleep 'firefoxos-open lock' >/dev/null 2>&1 &
+    before-sleep 'firox-open lock' >/dev/null 2>&1 &
 
 # One-time per-user setup (folders, web app runtime, welcome tip)
-firefoxos-user-setup >/dev/null 2>&1 &
+firox-user-setup >/dev/null 2>&1 &

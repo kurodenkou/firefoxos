@@ -1,0 +1,116 @@
+#!/usr/bin/python3
+"""
+Apply a Firox Linux theme's *application* style (light or dark) for the
+current user. Called by `firox-theme set`.
+
+    app-style THEME_CONF
+
+Reads COLOR_SCHEME, GTK_THEME, ICON_THEME and QT_PALETTE from the theme's
+theme.conf and updates:
+  - GSettings org.gnome.desktop.interface (GTK4/libadwaita apps, Firefox and
+    web apps via the settings portal, GTK3 apps on Wayland)
+  - ~/.config/gtk-3.0/settings.ini and gtk-4.0/settings.ini
+  - ~/.config/lxqt/lxqt.conf (Qt apps such as the file manager)
+Only the keys we own are touched; anything else in those files is kept.
+"""
+
+import configparser
+import os
+import shutil
+import subprocess
+import sys
+
+DARK_QT_PALETTE = {
+    "window_color": "#2b2b2b",
+    "base_color": "#232323",
+    "window_text_color": "#e8e8e8",
+    "text_color": "#e8e8e8",
+    "highlight_color": "#5c5c5c",
+    "highlighted_text_color": "#ffffff",
+    "link_color": "#b8c4d0",
+    "link_visited_color": "#a8a8b8",
+    "tooltip_base_color": "#2b2b2b",
+    "tooltip_text_color": "#e8e8e8",
+}
+
+
+def read_conf(path):
+    conf = {}
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                conf[k] = v
+    return conf
+
+
+def ini(path):
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str  # keep key case
+    try:
+        parser.read(path)
+    except configparser.Error:
+        pass
+    return parser
+
+
+def write_ini(parser, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        parser.write(fh, space_around_delimiters=False)
+    os.replace(tmp, path)
+
+
+def gsettings(key, value):
+    if shutil.which("gsettings"):
+        subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, value],
+                       stderr=subprocess.DEVNULL, check=False)
+
+
+def main():
+    conf = read_conf(sys.argv[1])
+    dark = conf.get("COLOR_SCHEME", "prefer-light") == "prefer-dark"
+    gtk_theme = conf.get("GTK_THEME", "adw-gtk3-dark" if dark else "adw-gtk3")
+    icons = conf.get("ICON_THEME", "Papirus-Dark" if dark else "Papirus")
+    cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+
+    # GSettings: libadwaita, Firefox (via the settings portal), GTK3 on Wayland
+    gsettings("color-scheme", "prefer-dark" if dark else "prefer-light")
+    gsettings("gtk-theme", gtk_theme)
+    gsettings("icon-theme", icons)
+
+    # GTK settings.ini fallbacks
+    for version in ("gtk-3.0", "gtk-4.0"):
+        path = os.path.join(cfg, version, "settings.ini")
+        p = ini(path)
+        if not p.has_section("Settings"):
+            p.add_section("Settings")
+        p["Settings"]["gtk-application-prefer-dark-theme"] = "1" if dark else "0"
+        p["Settings"]["gtk-icon-theme-name"] = icons
+        if version == "gtk-3.0":
+            p["Settings"]["gtk-theme-name"] = gtk_theme
+        write_ini(p, path)
+
+    # Qt (LXQt platform plugin re-reads this file live)
+    path = os.path.join(cfg, "lxqt", "lxqt.conf")
+    p = ini(path)
+    if not p.has_section("General"):
+        p.add_section("General")
+    p["General"]["icon_theme"] = icons
+    if conf.get("QT_PALETTE", "dark" if dark else "light") == "dark":
+        if not p.has_section("Palette"):
+            p.add_section("Palette")
+        for k, v in DARK_QT_PALETTE.items():
+            p["Palette"][k] = v
+    elif p.has_section("Palette"):
+        for k in DARK_QT_PALETTE:
+            p.remove_option("Palette", k)
+        if not p["Palette"]:
+            p.remove_section("Palette")
+    write_ini(p, path)
+
+
+if __name__ == "__main__":
+    main()

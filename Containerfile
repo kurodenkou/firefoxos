@@ -1,4 +1,4 @@
-# FirefoxOS — a Universal Blue image built around Firefox web apps (PWAs),
+# Firox Linux — a Universal Blue image built around Firefox web apps (PWAs),
 # Waydroid, and a classic "XP-style" Wayland desktop (labwc + waybar + a
 # custom Start menu).
 

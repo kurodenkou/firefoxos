@@ -1,9 +1,9 @@
 #!/usr/bin/bash
-# FirefoxOS image build script. Runs once inside the Containerfile build.
+# Firox Linux image build script. Runs once inside the Containerfile build.
 set -ouex pipefail
 
 FEDORA_VERSION="$(rpm -E %fedora)"
-echo "Building FirefoxOS on Fedora ${FEDORA_VERSION}"
+echo "Building Firox Linux on Fedora ${FEDORA_VERSION}"
 
 ### ---------------------------------------------------------------------------
 ### 1. Third-party repos
@@ -126,7 +126,7 @@ sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/firefoxpwa.repo
 
 cp -avf /ctx/system_files/. /
 
-chmod 0755 /usr/bin/firefoxos-*
+chmod 0755 /usr/bin/firox-*
 
 # Compile dconf defaults (GTK4/libadwaita apps read these)
 dconf update || true
@@ -153,11 +153,11 @@ systemctl enable waydroid-container.service
 ### ---------------------------------------------------------------------------
 
 sed -i \
-    -e 's/^NAME=.*/NAME="FirefoxOS"/' \
-    -e 's/^PRETTY_NAME=.*/PRETTY_NAME="FirefoxOS (Fedora '"${FEDORA_VERSION}"')"/' \
-    -e 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="firefoxos"/' \
+    -e 's/^NAME=.*/NAME="Firox Linux"/' \
+    -e 's/^PRETTY_NAME=.*/PRETTY_NAME="Firox Linux (Fedora '"${FEDORA_VERSION}"')"/' \
+    -e 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="firox"/' \
     /usr/lib/os-release
-grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="firefoxos"' >> /usr/lib/os-release
+grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="firox"' >> /usr/lib/os-release
 
 ### ---------------------------------------------------------------------------
 ### 6. Cleanup

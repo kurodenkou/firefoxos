@@ -1,0 +1,72 @@
+# Firox-Modern: same layout as Firox-Luna, in quiet translucent grey.
+# Flat monochrome SVG buttons live next to this file (they must exist here:
+# labwc would otherwise find the Luna buttons under the same theme name).
+
+border.width: 1
+window.titlebar.padding.width: 6
+window.titlebar.padding.height: 2
+
+window.active.border.color: #3c3c3ce6
+window.inactive.border.color: #4a4a4acc
+
+window.active.title.bg: Solid
+window.active.title.bg.color: #2b2b2be6
+window.inactive.title.bg: Solid
+window.inactive.title.bg.color: #3a3a3acc
+
+window.active.label.text.color: #f0f0f0
+window.inactive.label.text.color: #9a9a9a
+window.label.text.justify: left
+
+window.button.width: 30
+window.button.height: 24
+window.button.spacing: 0
+window.button.hover.bg.color: #ffffff22
+window.button.hover.bg.corner-radius: 4
+
+window.active.button.unpressed.image.color: #e0e0e0
+window.inactive.button.unpressed.image.color: #8a8a8a
+
+window.active.shadow.size: 24
+window.inactive.shadow.size: 14
+window.active.shadow.color: #00000066
+window.inactive.shadow.color: #00000033
+
+menu.overlap.x: -2
+menu.overlap.y: 0
+menu.width.min: 140
+menu.width.max: 320
+menu.border.width: 1
+menu.border.color: #4a4a4a
+menu.items.bg.color: #2b2b2bf0
+menu.items.text.color: #e8e8e8
+menu.items.active.bg.color: #4a4a4a
+menu.items.active.text.color: #ffffff
+menu.items.padding.x: 10
+menu.items.padding.y: 5
+menu.separator.width: 1
+menu.separator.padding.width: 6
+menu.separator.padding.height: 3
+menu.separator.color: #4a4a4a
+menu.title.bg.color: #2b2b2b
+menu.title.text.color: #f0f0f0
+menu.title.text.justify: Left
+
+osd.bg.color: #2b2b2be6
+osd.border.color: #4a4a4a
+osd.border.width: 1
+osd.label.text.color: #f0f0f0
+osd.window-switcher.style-classic.width: 480
+osd.window-switcher.style-classic.padding: 6
+osd.window-switcher.style-classic.item.padding.x: 10
+osd.window-switcher.style-classic.item.padding.y: 3
+osd.window-switcher.style-classic.item.active.border.width: 1
+osd.window-switcher.style-classic.item.active.border.color: #8a8a8a
+osd.window-switcher.style-classic.item.active.bg.color: #4a4a4a
+osd.window-switcher.preview.border.width: 2
+osd.window-switcher.preview.border.color: #8a8a8a,#2b2b2b,#8a8a8a
+
+snapping.overlay.region.bg.color: #ffffff30
+snapping.overlay.edge.bg.color: #ffffff30
+snapping.overlay.region.border.color: #a0a0a0
+snapping.overlay.edge.border.color: #a0a0a0

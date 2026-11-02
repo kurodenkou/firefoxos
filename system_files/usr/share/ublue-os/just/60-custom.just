@@ -1,7 +1,7 @@
-# FirefoxOS recipes (`ujust --choose`, or e.g. `ujust setup-waydroid`)
+# Firox Linux recipes (`ujust --choose`, or e.g. `ujust setup-waydroid`)
 
 # Set up Waydroid for Android apps. TYPE is "vanilla" (no Google) or "gapps"
-[group('FirefoxOS')]
+[group('Firox Linux')]
 setup-waydroid TYPE="vanilla":
     #!/usr/bin/bash
     set -euo pipefail
@@ -29,7 +29,7 @@ setup-waydroid TYPE="vanilla":
     read -rp "Press Enter to close" _
 
 # Print the Android ID needed to certify a GAPPS Waydroid install with Google
-[group('FirefoxOS')]
+[group('Firox Linux')]
 waydroid-google-id:
     #!/usr/bin/bash
     set -euo pipefail
@@ -40,7 +40,7 @@ waydroid-google-id:
     echo "Paste the number at https://www.google.com/android/uncertified then restart Waydroid."
 
 # Remove Waydroid's Android image and all its data
-[group('FirefoxOS')]
+[group('Firox Linux')]
 reset-waydroid:
     #!/usr/bin/bash
     set -euo pipefail
@@ -54,12 +54,12 @@ reset-waydroid:
     echo "Waydroid reset. Run 'ujust setup-waydroid' to set it up again."
 
 # Download (or update) the Firefox runtime used by web apps
-[group('FirefoxOS')]
+[group('Firox Linux')]
 install-webapp-runtime:
     firefoxpwa runtime install
 
 # Install the Bazaar app store (Flathub) for "Add or Remove Programs"
-[group('FirefoxOS')]
+[group('Firox Linux')]
 install-app-store:
     #!/usr/bin/bash
     set -euo pipefail
@@ -68,12 +68,12 @@ install-app-store:
     echo "Installed. Open Start -> Add or Remove Programs."
     read -rp "Press Enter to close" _
 
-# Throw away your desktop customisations and go back to the FirefoxOS defaults
-[group('FirefoxOS')]
+# Throw away your desktop customisations and go back to the Firox Linux defaults
+[group('Firox Linux')]
 reset-desktop:
     #!/usr/bin/bash
     set -euo pipefail
-    for d in labwc waybar mako foot fuzzel pcmanfm-qt/firefoxos; do
+    for d in labwc waybar mako foot fuzzel pcmanfm-qt/firox; do
         if [ -e ~/.config/$d ]; then
             mv ~/.config/$d ~/.config/$d.bak-$(date +%s)
             echo "Backed up ~/.config/$d"
@@ -82,7 +82,7 @@ reset-desktop:
     echo "Done. Log off and back on to apply."
 
 # Copy the default desktop config into ~/.config so you can edit it
-[group('FirefoxOS')]
+[group('Firox Linux')]
 customize-desktop:
     #!/usr/bin/bash
     set -euo pipefail
@@ -93,25 +93,25 @@ customize-desktop:
     done
 
 # Switch the desktop look: "classic" (blue/green) or "modern" (grey, translucent)
-[group('FirefoxOS')]
+[group('Firox Linux')]
 theme NAME="":
     #!/usr/bin/bash
     if [ -z "{{ NAME }}" ]; then
-        echo "Current theme: $(firefoxos-theme)"
-        echo "Available: $(firefoxos-theme list | paste -sd ' ')"
+        echo "Current theme: $(firox-theme)"
+        echo "Available: $(firox-theme list | paste -sd ' ')"
         echo "Usage: ujust theme modern"
     else
-        firefoxos-theme set "{{ NAME }}"
+        firox-theme set "{{ NAME }}"
     fi
 
 # Fix silent/crackling Realtek onboard audio with hello2himel/linux-audio-fix.
 # Runs a pinned, checksum-verified copy; extra flags go to the script
 # (e.g. --dry-run, --list-chips, --restore, --uninstall).
-[group('FirefoxOS')]
+[group('Firox Linux')]
 fix-realtek-audio *ARGS:
     #!/usr/bin/bash
     set -euo pipefail
-    # Pinned to the version reviewed for FirefoxOS. To update: change both
+    # Pinned to the version reviewed for Firox Linux. To update: change both
     # lines after reading the new script.
     COMMIT=4742f0b8153e863c3b800dd53b3fa255e89fed13
     SHA256=a378fb4e73d095a0da5a77305c00daf6934b8b31ff352f0729f28f6b94b1b0d7
@@ -124,7 +124,7 @@ fix-realtek-audio *ARGS:
         exit 1
     fi
     args=({{ ARGS }})
-    # On FirefoxOS, keep the fix by replaying the chip commands at boot.
+    # On Firox Linux, keep the fix by replaying the chip commands at boot.
     # The script's default "modprobe" mode would force the legacy Intel
     # driver (dsp_driver=1, can break audio on newer laptops) and try to
     # rebuild the initramfs, which doesn't apply to image-based systems.
@@ -134,6 +134,6 @@ fix-realtek-audio *ARGS:
     esac
     bash "$tmp/AudioFix.sh" "${args[@]}"
     echo
-    echo "FirefoxOS: ignore the /tmp path above. To undo later, use:"
+    echo "Firox Linux: ignore the /tmp path above. To undo later, use:"
     echo "  ujust fix-realtek-audio --restore     (put mixer settings back)"
     echo "  ujust fix-realtek-audio --uninstall   (stop re-applying at boot)"

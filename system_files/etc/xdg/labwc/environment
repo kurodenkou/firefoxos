@@ -1,4 +1,4 @@
-# FirefoxOS session environment (labwc reads this before starting).
+# Firox Linux session environment (labwc reads this before starting).
 # Override per-user in ~/.config/labwc/environment.
 XDG_CURRENT_DESKTOP=labwc:wlroots
 XCURSOR_THEME=Breeze_Light
