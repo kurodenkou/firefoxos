@@ -71,7 +71,7 @@ Justfile                      local build helpers (from ublue image-template)
 ### Rebase an existing Fedora Atomic / Universal Blue system
 
 ```bash
-sudo bootc switch ghcr.io/kurodenkou/firefoxos:latest
+sudo bootc switch ghcr.io/kurodenkou/firox:latest
 ```
 
 ```bash
@@ -83,7 +83,7 @@ systemctl reboot
 Run **Actions → Build disk images** (`build-disk.yml`) in GitHub and download the `anaconda-iso` artifact, or build one locally:
 
 ```bash
-just build-iso ghcr.io/kurodenkou/firefoxos latest
+just build-iso ghcr.io/kurodenkou/firox latest
 ```
 
 The installer creates your user account. There's no separate setup wizard.
@@ -106,7 +106,13 @@ The qcow2 image has a test user `xp` with password `firox` (set in `disk_config/
 
 ### Upgrading from FirefoxOS
 
-There's nothing to do: update as usual (`ujust update`, then restart). On your first login afterwards, your theme choice, Start menu history and desktop settings move to their new `firox` locations automatically. The old `firefoxos-*` commands still work as aliases for `firox-*`.
+FirefoxOS machines track the old image, `ghcr.io/kurodenkou/firefoxos`, which no longer gets updates. Switch each one to the new image once, then restart:
+
+```bash
+sudo bootc switch ghcr.io/kurodenkou/firox:latest
+```
+
+From then on it updates normally (`ujust update`). On your first login afterwards, your theme choice, Start menu history and desktop settings move to their new `firox` locations automatically. The old `firefoxos-*` commands still work as aliases for `firox-*`.
 
 ## After first login
 
@@ -134,7 +140,7 @@ Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskba
 
 ## Building and signing
 
-GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firefoxos` (named after the repository) on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
+GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
 
 ## Known limitations
 
