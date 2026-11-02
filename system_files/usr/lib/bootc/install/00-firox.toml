@@ -1,0 +1,4 @@
+# Default root filesystem for installs made from this image.
+# Read by bootc-image-builder (ISO / qcow2 / raw) and `bootc install`.
+[install.filesystem.root]
+type = "btrfs"
