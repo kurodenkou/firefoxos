@@ -9,6 +9,9 @@
 #   firox-theme path FILE       print the themed file to use for FILE
 #                                   (e.g. waybar.css, mako.conf), falling back
 #                                   to the classic version
+#   firox-theme apps [MODE]     print or set light/dark apps: auto (follow
+#                                   the theme: Modern dark, Classic light),
+#                                   light or dark
 #   firox-theme sync            login-time setup for the current theme
 set -u
 
@@ -19,12 +22,20 @@ STATE_FILE="$CONF/firox/theme"
 # Which theme was last fully applied for this user (wallpaper + app style)
 APPS_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/firox/theme-applied"
 DEFAULT_THEME="$(cat /etc/firox/theme 2>/dev/null || echo classic)"
+APPS_FILE="$CONF/firox/apps"
 
 current() {
     local t
     t="$(cat "$STATE_FILE" 2>/dev/null || echo "$DEFAULT_THEME")"
     [ -d "$THEMES/$t" ] || t=classic
     echo "$t"
+}
+
+# Light/dark apps: auto (follow the theme), light or dark
+apps_mode() {
+    local m
+    m="$(cat "$APPS_FILE" 2>/dev/null)"
+    case "$m" in light|dark) echo "$m" ;; *) echo auto ;; esac
 }
 
 # Read KEY from a theme's theme.conf
@@ -119,11 +130,12 @@ apply_running() {
     switch_wallpaper "$t"
 }
 
-# Light or dark apps (GTK, libadwaita, Firefox, Qt) to match the theme
+# Light or dark apps (GTK, libadwaita, Firefox, Qt): the theme's, or the
+# user's own choice
 apply_apps() {
-    /usr/libexec/firox/app-style "$THEMES/$1/theme.conf" || return 0
+    /usr/libexec/firox/app-style "$THEMES/$1/theme.conf" "$(apps_mode)" || return 0
     mkdir -p "$(dirname "$APPS_STAMP")"
-    echo "$1" > "$APPS_STAMP"
+    echo "$1 $(apps_mode)" > "$APPS_STAMP"
 }
 
 case "${1:-get}" in
@@ -133,6 +145,14 @@ case "${1:-get}" in
         [ $# -ge 2 ] || { echo "usage: firox-theme path FILE" >&2; exit 2; }
         path_for "$(current)" "$2"
         ;;
+    apps)
+        if [ -z "${2:-}" ]; then apps_mode; exit 0; fi
+        case "$2" in auto|light|dark) ;; *) echo "usage: firox-theme apps {auto|light|dark}" >&2; exit 2 ;; esac
+        mkdir -p "$(dirname "$APPS_FILE")"
+        echo "$2" > "$APPS_FILE"
+        apply_apps "$(current)"
+        echo "Apps: $2"
+        ;;
     sync)
         # At login: point labwc at the theme. Once per theme (e.g. a new user,
         # or an upgrade that changed the default), also apply its wallpaper
@@ -140,8 +160,11 @@ case "${1:-get}" in
         # the next switch.
         t="$(current)"
         link_labwc_theme "$t"
-        if [ "$(cat "$APPS_STAMP" 2>/dev/null)" != "$t" ]; then
+        stamp="$(cat "$APPS_STAMP" 2>/dev/null)"
+        if [ "${stamp%% *}" != "$t" ]; then
             seed_wallpaper "$t"
+            apply_apps "$t"
+        elif [ "$stamp" != "$t $(apps_mode)" ]; then
             apply_apps "$t"
         fi
         ;;
@@ -159,7 +182,7 @@ case "${1:-get}" in
         echo "Theme set to $t"
         ;;
     *)
-        sed -n '2,13s/^# \{0,1\}//p' "$0" >&2
+        sed -n '2,16s/^# \{0,1\}//p' "$0" >&2
         exit 2
         ;;
 esac

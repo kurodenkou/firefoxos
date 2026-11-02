@@ -6,6 +6,9 @@ Firox Linux Control Panel: an XP "classic view" style grid of settings applets.
     firox-control-panel system     open System Properties directly
     firox-control-panel datetime   open Date and Time directly
     firox-control-panel display    open Display directly
+    firox-control-panel appearance open Appearance directly
+    firox-control-panel power      open Power Options directly
+    firox-control-panel accounts   open User Accounts directly
 """
 
 import json
@@ -25,7 +28,8 @@ from gi.repository import GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 # (icon, title, description, argv)
 APPLETS = [
     ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["firox-display"]),
-    ("preferences-desktop-theme", "Appearance", "Classic blue or Modern grey look", ["@appearance"]),
+    ("preferences-system-power", "Power Options", "Turn off the monitor and sleep when idle", ["@power"]),
+    ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
      ["pcmanfm-qt", "--profile=firox", "--desktop-pref=background"]),
     ("multimedia-volume-control", "Sounds and Audio Devices", "Speakers, microphones and volume", ["pavucontrol"]),
@@ -247,10 +251,121 @@ class AppearanceDialog(Gtk.Dialog):
             radio.set_active(name == current)
             radio.connect("toggled", lambda r, n=name: r.get_active() and setattr(self, "choice", n))
             box.pack_start(radio, False, False, 0)
+
+        box.pack_start(Gtk.Separator(), False, False, 4)
+        box.pack_start(Gtk.Label(label="Programs (browser, files, settings and other apps):", xalign=0),
+                       False, False, 0)
+        self.apps = self.apps_before = run_text(["firox-theme", "apps"]) or "auto"
+        row = Gtk.Box(spacing=16)
+        group = None
+        for mode, label in (("auto", "Match the look"), ("light", "Light"), ("dark", "Dark")):
+            radio = Gtk.RadioButton.new_with_label_from_widget(group, label)
+            group = group or radio
+            radio.set_active(mode == self.apps)
+            radio.connect("toggled", lambda r, m=mode: r.get_active() and setattr(self, "apps", m))
+            row.pack_start(radio, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        hint = Gtk.Label(xalign=0)
+        hint.set_markup("<small>Match the look: dark with Modern, light with Classic.</small>")
+        box.pack_start(hint, False, False, 0)
+        self.theme_before = current
         self.show_all()
 
     def apply(self):
-        subprocess.run(["firox-theme", "set", self.choice])
+        if self.apps != self.apps_before:
+            subprocess.run(["firox-theme", "apps", self.apps])
+        if self.choice != self.theme_before:
+            subprocess.run(["firox-theme", "set", self.choice])
+
+
+POWER_CHOICES = [1, 2, 3, 5, 10, 15, 20, 25, 30, 45, 60, 120, 180, 300, 0]
+
+
+def minutes_label(m):
+    if m == 0:
+        return "Never"
+    if m < 60:
+        return f"After {m} min" + ("s" if m > 1 else "")
+    h = m // 60
+    return f"After {h} hour" + ("s" if h > 1 else "")
+
+
+def has_battery():
+    for path in glob.glob("/sys/class/power_supply/*/type"):
+        try:
+            with open(path) as fh:
+                if fh.read().strip() == "Battery":
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+class PowerDialog(Gtk.Dialog):
+    """XP-style Power Options: idle timers for the monitor, lock and sleep."""
+
+    def __init__(self, parent):
+        super().__init__(title="Power Options", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(420, -1)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("preferences-system-power", Gtk.IconSize.DIALOG),
+                          False, False, 0)
+        intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=44,
+                          label="Save power by turning off the monitor or putting the computer "
+                                "to sleep when you're not using it. Videos and full-screen apps "
+                                "keep the screen on.")
+        header.pack_start(intro, True, True, 0)
+        box.pack_start(header, False, False, 0)
+
+        self.values = {}
+        for line in run_text(["firox-power"]).splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                self.values[k] = int(v) if v.isdigit() else 0
+        self.before = dict(self.values)
+        battery = has_battery()
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        cols = [("AC", "Plugged in")] + ([("BATTERY", "On battery")] if battery else [])
+        if battery:
+            for i, (_k, title) in enumerate(cols):
+                t = Gtk.Label(xalign=0)
+                t.set_markup(f"<b>{title}</b>")
+                grid.attach(t, i + 1, 0, 1, 1)
+        rows = [("MONITOR", "Turn off the monitor:"), ("SLEEP", "Put the computer to sleep:")]
+        for r, (key, label) in enumerate(rows, start=1):
+            grid.attach(Gtk.Label(label=label, xalign=0), 0, r, 1, 1)
+            for i, (suffix, _t) in enumerate(cols):
+                grid.attach(self.combo(f"{key}_{suffix}"), i + 1, r, 1, 1)
+        grid.attach(Gtk.Label(label="Lock the screen:", xalign=0), 0, 3, 1, 1)
+        grid.attach(self.combo("LOCK"), 1, 3, 1, 1)
+        box.pack_start(grid, False, False, 0)
+
+        wake = Gtk.CheckButton(label="Ask for my password when the computer wakes up")
+        wake.set_active(self.values.get("LOCK_ON_WAKE", 1) == 1)
+        wake.connect("toggled", lambda b: self.values.__setitem__("LOCK_ON_WAKE", int(b.get_active())))
+        box.pack_start(wake, False, False, 0)
+        self.show_all()
+
+    def combo(self, key):
+        cur = self.values.get(key, 0)
+        choices = POWER_CHOICES if cur in POWER_CHOICES else sorted(POWER_CHOICES[:-1] + [cur]) + [0]
+        c = Gtk.ComboBoxText()
+        for m in choices:
+            c.append(str(m), minutes_label(m))
+        c.set_active_id(str(cur))
+        c.connect("changed", lambda w: self.values.__setitem__(key, int(w.get_active_id())))
+        return c
+
+    def apply(self):
+        changed = [f"{k}={v}" for k, v in self.values.items() if self.before.get(k) != v]
+        if changed:
+            subprocess.run(["firox-power", "set"] + changed)
 
 
 PICTURES_DIR = "/usr/share/firox/pictures"
@@ -480,6 +595,11 @@ class ControlPanel(Gtk.ApplicationWindow):
                 dlg.apply()
                 self.reload_theme()
             dlg.destroy()
+        elif argv == ["@power"]:
+            dlg = PowerDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@accounts"]:
             dlg = AccountsDialog(self)
             if dlg.run() == Gtk.ResponseType.APPLY:
@@ -508,14 +628,15 @@ class App(Gtk.Application):
         args = cmdline.get_arguments()[1:]
         page = args[0] if args else None
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
-                  "accounts": ["@accounts"],
+                  "accounts": ["@accounts"], "power": ["@power"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
             if direct[page][0].startswith("@"):
                 self.hold()
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
-                       "appearance": AppearanceDialog, "accounts": AccountsDialog}[page]
+                       "appearance": AppearanceDialog, "accounts": AccountsDialog,
+                       "power": PowerDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()
