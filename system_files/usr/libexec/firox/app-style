@@ -3,10 +3,10 @@
 Apply a Firox Linux theme's *application* style (light or dark) for the
 current user. Called by `firox-theme set`.
 
-    app-style THEME_CONF
+    app-style THEME_CONF [auto|light|dark]
 
 Reads COLOR_SCHEME, GTK_THEME, ICON_THEME and QT_PALETTE from the theme's
-theme.conf and updates:
+theme.conf ("auto", the default) or forces light or dark apps, and updates:
   - GSettings org.gnome.desktop.interface (GTK4/libadwaita apps, Firefox and
     web apps via the settings portal, GTK3 apps on Wayland)
   - ~/.config/gtk-3.0/settings.ini and gtk-4.0/settings.ini
@@ -71,7 +71,14 @@ def gsettings(key, value):
 
 def main():
     conf = read_conf(sys.argv[1])
-    dark = conf.get("COLOR_SCHEME", "prefer-light") == "prefer-dark"
+    mode = sys.argv[2] if len(sys.argv) > 2 else "auto"
+    if mode in ("light", "dark"):
+        # The user's choice wins over the theme's
+        dark = mode == "dark"
+        conf["GTK_THEME"] = "adw-gtk3-dark" if dark else "adw-gtk3"
+        conf["QT_PALETTE"] = mode
+    else:
+        dark = conf.get("COLOR_SCHEME", "prefer-light") == "prefer-dark"
     gtk_theme = conf.get("GTK_THEME", "adw-gtk3-dark" if dark else "adw-gtk3")
     icons = conf.get("ICON_THEME", "Papirus-Dark" if dark else "Papirus")
     cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")

@@ -32,7 +32,9 @@ The login screen matches the default look:
 
 ![Modern login screen](docs/screenshots/login-modern.png)
 
-Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
+Want Modern with light apps, or Classic with dark ones? The Appearance window also has a **Programs** setting: **Match the look** (the default), **Light** or **Dark**. Light or Dark keeps apps that way whichever look you choose. From a terminal: `ujust dark-mode on|off|auto` (or `firox-theme apps dark|light|auto`).
+
+Switch looks in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
@@ -48,7 +50,10 @@ Switch in **Control Panel → Appearance**, or with `ujust theme modern` / `ujus
 | Web Apps | `firox-webapps`: list, open and remove installed PWAs |
 | Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
 | Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
+| Power saving | **Control Panel → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
+
+![Power Options on a laptop](docs/screenshots/power-options.png)
 
 ### Keyboard shortcuts
 
@@ -147,6 +152,8 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
 | `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
+| `ujust dark-mode [on\|off\|auto]` | Dark or light apps regardless of the look (`auto` follows it) |
+| `ujust power-saving [KEY=MINUTES...\|reset]` | Show or change the monitor-off, lock and sleep timers (e.g. `MONITOR_AC=10 SLEEP_BATTERY=20`; 0 = never) |
 | `ujust install-nvidia` / `ujust remove-nvidia` | Switch to / from the image with NVIDIA drivers |
 
 ## Customising

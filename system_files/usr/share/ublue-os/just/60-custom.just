@@ -111,6 +111,34 @@ theme NAME="":
         firox-theme set "{{ NAME }}"
     fi
 
+# Light or dark apps, independent of the Classic/Modern look
+# (auto = dark with Modern, light with Classic)
+[group('Firox Linux')]
+dark-mode MODE="":
+    #!/usr/bin/bash
+    case "{{ MODE }}" in
+        "") echo "Apps: $(firox-theme apps)"; echo "Usage: ujust dark-mode on|off|auto" ;;
+        on|dark) firox-theme apps dark ;;
+        off|light) firox-theme apps light ;;
+        auto) firox-theme apps auto ;;
+        *) echo "Usage: ujust dark-mode on|off|auto" >&2; exit 2 ;;
+    esac
+
+# Monitor power saving and sleep timers (minutes, 0 = never), e.g.
+#   ujust power-saving MONITOR_AC=10 SLEEP_BATTERY=20
+# Same as Control Panel > Power Options
+[group('Firox Linux')]
+power-saving *SETTINGS:
+    #!/usr/bin/bash
+    if [ -z "{{ SETTINGS }}" ]; then
+        firox-power
+        echo "Usage: ujust power-saving KEY=MINUTES... (0 = never; ujust power-saving reset)"
+    elif [ "{{ SETTINGS }}" = reset ]; then
+        firox-power reset && firox-power
+    else
+        firox-power set {{ SETTINGS }} && firox-power
+    fi
+
 # Fix silent/crackling Realtek onboard audio with hello2himel/linux-audio-fix.
 # Runs a pinned, checksum-verified copy; extra flags go to the script
 # (e.g. --dry-run, --list-chips, --restore, --uninstall).

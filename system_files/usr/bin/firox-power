@@ -1,0 +1,104 @@
+#!/usr/bin/bash
+# firox-power: monitor power saving, screen lock and sleep timers.
+#
+#   firox-power                     show the current settings
+#   firox-power set KEY=VALUE...    change settings and apply them now
+#   firox-power reset               go back to the system defaults
+#   firox-power start               (re)start the idle watcher (used at login)
+#
+# Keys (minutes, 0 = never):
+#   MONITOR_AC  MONITOR_BATTERY     turn the screen off when idle
+#   LOCK                            lock the screen when idle
+#   SLEEP_AC    SLEEP_BATTERY       put the computer to sleep when idle
+#   LOCK_ON_WAKE=1|0                lock before sleeping
+# Settings live in ~/.config/firox/power.conf (defaults: /etc/firox/power.conf).
+# Apps that play video or are full screen keep the screen on (idle inhibit).
+set -u
+
+SYS_CONF=/etc/firox/power.conf
+USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/firox/power.conf"
+KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE"
+
+get() {
+    local v=""
+    [ -f "$USER_CONF" ] && v="$(sed -n "s/^$1=//p" "$USER_CONF" | tail -n1)"
+    [ -n "$v" ] || v="$(sed -n "s/^$1=//p" "$SYS_CONF" 2>/dev/null | tail -n1)"
+    case "$v" in ''|*[!0-9]*) v=0 ;; esac
+    echo "$v"
+}
+
+has_battery() {
+    local t
+    for t in /sys/class/power_supply/*/type; do
+        [ "$(cat "$t" 2>/dev/null)" = Battery ] && return 0
+    done
+    return 1
+}
+
+# "ac" or "battery"
+power_source() {
+    local d
+    has_battery || { echo ac; return; }
+    for d in /sys/class/power_supply/*; do
+        case "$(cat "$d/type" 2>/dev/null)" in
+            Mains|USB|USB_C|USB_PD) [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && { echo ac; return; } ;;
+        esac
+    done
+    echo battery
+}
+
+start() {
+    pkill -u "$USER" -x swayidle
+    local args=(-w) m src
+    m="$(get LOCK)"
+    [ "$m" -gt 0 ] && args+=(timeout $((m * 60)) 'firox-open lock')
+    for src in ac battery; do
+        [ "$src" = battery ] && ! has_battery && continue
+        m="$(get "MONITOR_${src^^}")"
+        [ "$m" -gt 0 ] && args+=(timeout $((m * 60)) "firox-power idle monitor $src" resume 'wlopm --on \*')
+        m="$(get "SLEEP_${src^^}")"
+        [ "$m" -gt 0 ] && args+=(timeout $((m * 60)) "firox-power idle sleep $src")
+    done
+    [ "$(get LOCK_ON_WAKE)" = 1 ] && args+=(before-sleep 'firox-open lock')
+    # Turn the screens back on after waking up, whatever happened before
+    args+=(after-resume 'wlopm --on \*')
+    setsid -f swayidle "${args[@]}" >/dev/null 2>&1
+}
+
+case "${1:-show}" in
+    show)
+        for k in $KEYS; do echo "$k=$(get "$k")"; done
+        echo "# power source: $(power_source)"
+        ;;
+    set)
+        shift
+        [ $# -gt 0 ] || { echo "usage: firox-power set KEY=MINUTES..." >&2; exit 2; }
+        mkdir -p "$(dirname "$USER_CONF")"
+        touch "$USER_CONF"
+        for kv in "$@"; do
+            k="${kv%%=*}" v="${kv#*=}"
+            case " $KEYS " in *" $k "*) ;; *) echo "firox-power: unknown setting $k" >&2; exit 2 ;; esac
+            case "$v" in ''|*[!0-9]*) echo "firox-power: $k needs a number of minutes (0 = never)" >&2; exit 2 ;; esac
+            sed -i "/^$k=/d" "$USER_CONF"
+            echo "$k=$v" >> "$USER_CONF"
+        done
+        start
+        ;;
+    reset)
+        rm -f "$USER_CONF"
+        start
+        ;;
+    start) start ;;
+    idle)
+        # Run by swayidle: only act if we're on the matching power source
+        [ "$(power_source)" = "${3:-ac}" ] || exit 0
+        case "${2:-}" in
+            monitor) exec wlopm --off '*' ;;
+            sleep)   exec systemctl suspend ;;
+        esac
+        ;;
+    *)
+        sed -n '2,17s/^# \{0,1\}//p' "$0" >&2
+        exit 2
+        ;;
+esac

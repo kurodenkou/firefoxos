@@ -36,12 +36,9 @@ fi
 kanshi >/dev/null 2>&1 &
 ( sleep 3; firox-displays restore ) >/dev/null 2>&1 &
 
-# Screen saver: lock after 10 minutes, blank after 15
-swayidle -w \
-    timeout 600 'firox-open lock' \
-    timeout 900 'wlopm --off \*' \
-    resume 'wlopm --on \*' \
-    before-sleep 'firox-open lock' >/dev/null 2>&1 &
+# Power saving: lock, screen off and sleep timers from Control Panel >
+# Power Options (~/.config/firox/power.conf, see `firox-power`)
+firox-power start
 
 # One-time per-user setup (folders, web app runtime, welcome tip)
 firox-user-setup >/dev/null 2>&1 &
