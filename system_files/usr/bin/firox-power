@@ -2,6 +2,7 @@
 # firox-power: monitor power saving, screen lock and sleep timers.
 #
 #   firox-power                     show the current settings
+#   firox-power get KEY             print one setting
 #   firox-power set KEY=VALUE...    change settings and apply them now
 #   firox-power reset               go back to the system defaults
 #   firox-power start               (re)start the idle watcher (used at login)
@@ -11,13 +12,15 @@
 #   LOCK                            lock the screen when idle
 #   SLEEP_AC    SLEEP_BATTERY       put the computer to sleep when idle
 #   LOCK_ON_WAKE=1|0                lock before sleeping
+#   SCREENSAVER_WAIT                start the screen saver (see
+#                                   firox-screensaver; it picks which one)
 # Settings live in ~/.config/firox/power.conf (defaults: /etc/firox/power.conf).
 # Apps that play video or are full screen keep the screen on (idle inhibit).
 set -u
 
 SYS_CONF=/etc/firox/power.conf
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/firox/power.conf"
-KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE"
+KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE SCREENSAVER_WAIT"
 
 get() {
     local v=""
@@ -50,6 +53,10 @@ power_source() {
 start() {
     pkill -u "$USER" -x swayidle
     local args=(-w) m src
+    m="$(get SCREENSAVER_WAIT)"
+    if [ "$m" -gt 0 ] && [ "$(firox-screensaver current)" != none ]; then
+        args+=(timeout $((m * 60)) 'firox-screensaver start' resume 'firox-screensaver stop')
+    fi
     m="$(get LOCK)"
     [ "$m" -gt 0 ] && args+=(timeout $((m * 60)) 'firox-open lock')
     for src in ac battery; do
@@ -66,6 +73,9 @@ start() {
 }
 
 case "${1:-show}" in
+    get)
+        get "${2:?usage: firox-power get KEY}"
+        ;;
     show)
         for k in $KEYS; do echo "$k=$(get "$k")"; done
         echo "# power source: $(power_source)"
@@ -93,12 +103,12 @@ case "${1:-show}" in
         # Run by swayidle: only act if we're on the matching power source
         [ "$(power_source)" = "${3:-ac}" ] || exit 0
         case "${2:-}" in
-            monitor) exec wlopm --off '*' ;;
-            sleep)   exec systemctl suspend ;;
+            monitor) firox-screensaver stop; exec wlopm --off '*' ;;
+            sleep)   firox-screensaver stop; exec systemctl suspend ;;
         esac
         ;;
     *)
-        sed -n '2,17s/^# \{0,1\}//p' "$0" >&2
+        sed -n '2,20s/^# \{0,1\}//p' "$0" >&2
         exit 2
         ;;
 esac

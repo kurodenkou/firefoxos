@@ -1,0 +1,120 @@
+#!/usr/bin/bash
+# firox-screensaver: full-screen screen savers that start when you're idle.
+#
+#   firox-screensaver                 show the current screen saver and wait
+#   firox-screensaver list            list screen savers (ID<TAB>name)
+#   firox-screensaver set ID [MIN]    choose one ("none" turns them off) and
+#                                     optionally how many idle minutes to wait
+#   firox-screensaver preview [ID]    show it now; move the mouse or press a
+#                                     key to stop
+#   firox-screensaver start | stop    used by the idle watcher (firox-power)
+#
+# Screen savers are NAME.conf files in ~/.local/share/firox/screensavers,
+# /etc/firox/screensavers and /usr/share/firox/screensavers (see the README
+# there). The choice is kept in ~/.config/firox/screensaver.
+set -u
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+CHOICE="$CONF/firox/screensaver"
+DIRS=("$DATA/firox/screensavers" /etc/firox/screensavers /usr/share/firox/screensavers)
+APP_ID=firox-screensaver
+
+current() {
+    local id
+    id="$(cat "$CHOICE" 2>/dev/null || cat /etc/firox/screensaver 2>/dev/null || echo none)"
+    [ "$id" = none ] || [ -n "$(file_for "$id")" ] || id=none
+    echo "$id"
+}
+
+file_for() {
+    local d
+    for d in "${DIRS[@]}"; do
+        [ -f "$d/$1.conf" ] && { echo "$d/$1.conf"; return; }
+    done
+}
+
+field() { sed -n "s/^$2=//p" "$1" | head -n1; }
+
+list() {
+    local d f id seen=" "
+    for d in "${DIRS[@]}"; do
+        for f in "$d"/*.conf; do
+            [ -f "$f" ] || continue
+            id="$(basename "$f" .conf)"
+            case "$seen" in *" $id "*) continue ;; esac
+            seen="$seen$id "
+            printf '%s\t%s\n' "$id" "$(field "$f" NAME || true)"
+        done
+    done | sort -t $'\t' -k2
+}
+
+running() { pgrep -u "$USER" -f -- "--app-id=$APP_ID" >/dev/null; }
+
+start() {
+    local id="${1:-$(current)}" f cmd
+    [ "$id" = none ] && return 0
+    f="$(file_for "$id")"
+    [ -n "$f" ] || { echo "firox-screensaver: no screen saver called $id" >&2; return 1; }
+    running && return 0
+    cmd="$(field "$f" COMMAND)"
+    if [ "$(field "$f" TERMINAL)" = false ]; then
+        setsid -f sh -c "exec -a $APP_ID-gui $cmd" >/dev/null 2>&1
+        return 0
+    fi
+    # A black, borderless, full-screen terminal (labwc rule for this app id)
+    setsid -f foot --app-id="$APP_ID" --fullscreen --title="Screen Saver" \
+        -o colors-dark.alpha=1.0 -o colors-dark.background=000000 \
+        -o colors-dark.foreground=c0c0c0 -o colors-dark.regular0=000000 \
+        -o mouse.hide-when-typing=yes \
+        -o pad=0x0 -- sh -c "$cmd" >/dev/null 2>&1
+}
+
+stop() {
+    pkill -u "$USER" -f -- "--app-id=$APP_ID" 2>/dev/null
+    pkill -u "$USER" -f -- "^$APP_ID-gui" 2>/dev/null
+    return 0
+}
+
+case "${1:-show}" in
+    show)
+        id="$(current)"
+        if [ "$id" = none ]; then echo "Screen saver: none"
+        else echo "Screen saver: $id ($(field "$(file_for "$id")" NAME)), after $(firox-power get SCREENSAVER_WAIT) min idle"; fi
+        ;;
+    list) list ;;
+    current) current ;;
+    set)
+        id="${2:-}"
+        if [ -z "$id" ] || { [ "$id" != none ] && [ -z "$(file_for "$id")" ]; }; then
+            echo "usage: firox-screensaver set {none|$(list | cut -f1 | paste -sd '|')} [MINUTES]" >&2
+            exit 2
+        fi
+        mkdir -p "$(dirname "$CHOICE")"
+        echo "$id" > "$CHOICE"
+        if [ -n "${3:-}" ]; then
+            firox-power set "SCREENSAVER_WAIT=$3"
+        else
+            firox-power start
+        fi
+        ;;
+    preview)
+        id="${2:-$(current)}"
+        [ "$id" = none ] && exit 0
+        stop
+        start "$id" || exit 1
+        # Stop at the first mouse move or key press once the screen saver is up
+        sleep 1
+        swayidle timeout 1 'true' resume "firox-screensaver stop" >/dev/null 2>&1 &
+        watcher=$!
+        sleep 0.5
+        while running; do sleep 0.3; done
+        kill "$watcher" 2>/dev/null
+        ;;
+    start) start ;;
+    stop) stop ;;
+    *)
+        sed -n '2,16s/^# \{0,1\}//p' "$0" >&2
+        exit 2
+        ;;
+esac

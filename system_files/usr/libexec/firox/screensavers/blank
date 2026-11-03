@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+# Blank screen saver: a black screen with no cursor
+tput civis 2>/dev/null
+clear
+exec sleep infinity

@@ -51,6 +51,7 @@ Switch looks in **Control Panel → Appearance**, or with `ujust theme modern` /
 | Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
 | Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
 | Power saving | **Control Panel → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
+| Screen savers | **Control Panel → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
 ![Power Options on a laptop](docs/screenshots/power-options.png)
@@ -152,11 +153,27 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
 | `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
+| `ujust screensaver [ID] [MINUTES]` | List screen savers, or pick one (`none` turns them off) and how long to wait |
 | `ujust dark-mode [on\|off\|auto]` | Dark or light apps regardless of the look (`auto` follows it) |
 | `ujust power-saving [KEY=MINUTES...\|reset]` | Show or change the monitor-off, lock and sleep timers (e.g. `MONITOR_AC=10 SLEEP_BATTERY=20`; 0 = never) |
 | `ujust install-nvidia` / `ujust remove-nvidia` | Switch to / from the image with NVIDIA drivers |
 
 ## Customising
+
+### Adding screen savers
+
+![Screen savers](docs/screenshots/screensavers.png)
+
+Any program that runs in a terminal can be a screen saver. Create `~/.local/share/firox/screensavers/NAME.conf` (or `/etc/firox/screensavers/` for every user):
+
+```ini
+NAME=Pipes
+COMMAND=pipes.sh
+```
+
+It shows up in **Control Panel → Screen Saver** straight away. It runs full screen in a black terminal and stops when you move the mouse or press a key. For a program that opens its own window instead, add `TERMINAL=false`. `COMMAND` can be a script you drop in `~/.local/bin` (handy for single-file savers such as `pipes.sh`) or any other program on your `PATH`. The built-in ones live in `/usr/share/firox/screensavers/`. The default for new users is in `/etc/firox/screensaver` (`none`).
+
+### Everything else
 
 Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Control Panel → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 

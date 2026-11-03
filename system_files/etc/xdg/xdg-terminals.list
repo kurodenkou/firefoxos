@@ -1,0 +1,3 @@
+# Terminal used for apps that run in one (htop, nvtop, ...): see xdg-terminal-exec
+foot.desktop
+org.codeberg.dnkl.foot.desktop

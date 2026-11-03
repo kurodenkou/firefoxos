@@ -132,4 +132,10 @@
     </device>
   </libinput>
 
+  <!-- Screen saver (firox-screensaver): no title bar, not in the taskbar -->
+  <windowRules>
+    <windowRule identifier="firox-screensaver" serverDecoration="no"
+                skipTaskbar="yes" skipWindowSwitcher="yes" />
+  </windowRules>
+
 </labwc_config>

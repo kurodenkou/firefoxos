@@ -139,6 +139,20 @@ power-saving *SETTINGS:
         firox-power set {{ SETTINGS }} && firox-power
     fi
 
+# Screen saver after idle: list them, or pick one ("none" = off) and the wait
+#   ujust screensaver aquarium 5
+# Same as Control Panel > Screen Saver
+[group('Firox Linux')]
+screensaver ID="" MINUTES="":
+    #!/usr/bin/bash
+    if [ -z "{{ ID }}" ]; then
+        firox-screensaver
+        echo "Available: none $(firox-screensaver list | cut -f1 | paste -sd ' ')"
+        echo "Usage: ujust screensaver ID [MINUTES]   (preview: firox-screensaver preview ID)"
+    else
+        firox-screensaver set "{{ ID }}" {{ MINUTES }}
+    fi
+
 # Fix silent/crackling Realtek onboard audio with hello2himel/linux-audio-fix.
 # Runs a pinned, checksum-verified copy; extra flags go to the script
 # (e.g. --dry-run, --list-chips, --restore, --uninstall).

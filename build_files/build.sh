@@ -81,11 +81,17 @@ PACKAGES=(
 
     # --- Accessories & Control Panel applets ---
     foot                         # Command Prompt
+    xdg-terminal-exec            # lets apps like htop/nvtop open in foot
     mousepad                     # Notepad
     galculator                   # Calculator
     ristretto                    # Picture viewer
     htop                         # Task Manager
     fastfetch
+
+    # --- Screen savers (Control Panel > Screen Saver) ---
+    asciiquarium
+    cmatrix
+    cbonsai
     pavucontrol                  # Sounds and Audio Devices
     alsa-tools                   # hda-verb, for `ujust fix-realtek-audio`
     network-manager-applet       # tray icon

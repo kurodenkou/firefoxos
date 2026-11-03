@@ -1,0 +1,13 @@
+Firox Linux screen savers (Control Panel > Screen Saver, `firox-screensaver`).
+
+Each NAME.conf is one screen saver:
+
+    NAME=Aquarium                 shown in the list
+    COMMAND=asciiquarium          run full screen in a black terminal
+    TERMINAL=false                optional: COMMAND opens its own window
+                                  (make it full screen yourself)
+
+Add your own in ~/.local/share/firox/screensavers/ (just for you) or
+/etc/firox/screensavers/ (everyone). A file with the same name as one here
+replaces it. Any terminal program works, e.g. one installed with brew or in a
+toolbox, as long as the command can be run from a terminal.
