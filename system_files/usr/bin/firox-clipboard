@@ -1,0 +1,125 @@
+#!/usr/bin/bash
+# firox-clipboard: clipboard manager for the Firox Linux desktop.
+#
+#   firox-clipboard history       pick something you copied earlier (Super+V);
+#                                 it goes back on the clipboard, ready to paste
+#   firox-clipboard clear         forget everything copied
+#   firox-clipboard set KEY=VALUE change a setting (HISTORY=1|0, MAX_ITEMS=N,
+#                                 KEEP_AFTER_RESTART=1|0)
+#   firox-clipboard               show the settings
+#   firox-clipboard start         start the background watcher (at login)
+#
+# On Wayland, copied text belongs to the app it was copied from and is gone
+# once that app closes. The watcher keeps a copy (with cliphist) and puts it
+# back when that happens, so copy -> close the window -> paste works. Items
+# that password managers mark as sensitive are never stored.
+# Settings: ~/.config/firox/clipboard.conf (defaults: /etc/firox/clipboard.conf)
+set -u
+
+SYS_CONF=/etc/firox/clipboard.conf
+USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/firox/clipboard.conf"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+KEYS="HISTORY MAX_ITEMS KEEP_AFTER_RESTART"
+
+get() {
+    local v=""
+    [ -f "$USER_CONF" ] && v="$(sed -n "s/^$1=//p" "$USER_CONF" | tail -n1)"
+    [ -n "$v" ] || v="$(sed -n "s/^$1=//p" "$SYS_CONF" 2>/dev/null | tail -n1)"
+    case "$v" in ''|*[!0-9]*) v=0 ;; esac
+    echo "$v"
+}
+
+max_items() {
+    local n
+    n="$(get MAX_ITEMS)"
+    [ "$(get HISTORY)" = 1 ] && [ "$n" -gt 0 ] && echo "$n" || echo 1
+}
+
+notify() { notify-send -a Clipboard -i org.kde.plasma.clipboard "$@" 2>/dev/null; }
+
+start() {
+    pkill -u "$USER" -f '^wl-paste --watch firox-clipboard' 2>/dev/null
+    [ "$(get KEEP_AFTER_RESTART)" = 1 ] || cliphist wipe 2>/dev/null
+    setsid -f wl-paste --watch firox-clipboard _changed </dev/null >/dev/null 2>&1
+}
+
+# Run by `wl-paste --watch` on every clipboard change, with the new contents
+# on stdin and CLIPBOARD_STATE set to data, nil (the owner went away), clear
+# or sensitive.
+changed() {
+    case "${CLIPBOARD_STATE:-data}" in
+        data)
+            cliphist -max-items "$(max_items)" store
+            ;;
+        nil)
+            # The app that owned the clipboard closed: put its last item back.
+            # (No contents on stdin in this state, so don't read it.)
+            last="$(cliphist list 2>/dev/null | head -n1)"
+            [ -n "$last" ] && printf '%s\n' "$last" | cliphist decode | wl-copy >/dev/null 2>&1
+            ;;
+    esac
+    return 0
+}
+
+history() {
+    local list cfg pick clear_line=$'clear\t\xe2\x9c\x95  Clear clipboard history'
+    # Friendlier labels for images ("[[ binary data 104 B png 40x30 ]]");
+    # only the id before the tab matters for decoding
+    list="$(cliphist list 2>/dev/null |
+        sed -E 's/\t\[\[ binary data .* ([a-z]+) ([0-9]+x[0-9]+) \]\]$/\tImage (\U\1\E, \2)/')"
+    if [ -z "$list" ]; then
+        notify "The clipboard is empty" "Copy something with Ctrl+C, then press Super+V to see it here."
+        return 0
+    fi
+    if [ "$(get HISTORY)" != 1 ]; then
+        notify "Clipboard history is off" "Turn it on in Settings > Clipboard."
+        return 0
+    fi
+    cfg=()
+    [ -e "$CFG/fuzzel/fuzzel.ini" ] || cfg=(--config "$(firox-theme path fuzzel.ini)")
+    pick="$(printf '%s\n%s\n' "$list" "$clear_line" |
+        fuzzel "${cfg[@]}" --dmenu --with-nth 2 --prompt 'Clipboard: ' --width 60 --lines 12 \
+            --placeholder 'Type to search what you copied')" || return 0
+    case "$pick" in
+        "") return 0 ;;
+        clear$'\t'*) clear_all ;;
+        *) printf '%s\n' "$pick" | cliphist decode | wl-copy >/dev/null 2>&1 ;;
+    esac
+}
+
+clear_all() {
+    cliphist wipe
+    wl-copy --clear
+    notify "Clipboard cleared"
+}
+
+case "${1:-show}" in
+    show)
+        for k in $KEYS; do echo "$k=$(get "$k")"; done
+        echo "# items remembered: $(cliphist list 2>/dev/null | wc -l)"
+        ;;
+    set)
+        shift
+        [ $# -gt 0 ] || { echo "usage: firox-clipboard set KEY=VALUE..." >&2; exit 2; }
+        mkdir -p "$(dirname "$USER_CONF")"
+        touch "$USER_CONF"
+        for kv in "$@"; do
+            k="${kv%%=*}" v="${kv#*=}"
+            case " $KEYS " in *" $k "*) ;; *) echo "firox-clipboard: unknown setting $k" >&2; exit 2 ;; esac
+            case "$v" in ''|*[!0-9]*) echo "firox-clipboard: $k needs a number" >&2; exit 2 ;; esac
+            sed -i "/^$k=/d" "$USER_CONF"
+            echo "$k=$v" >> "$USER_CONF"
+        done
+        # Shrink the history now if it was made smaller or turned off
+        cliphist list 2>/dev/null | tail -n +"$(( $(max_items) + 1 ))" | cliphist delete 2>/dev/null
+        ;;
+    get) get "${2:?usage: firox-clipboard get KEY}" ;;
+    start) start ;;
+    _changed) changed ;;
+    history) history ;;
+    clear) clear_all ;;
+    *)
+        sed -n '2,17s/^# \{0,1\}//p' "$0" >&2
+        exit 2
+        ;;
+esac

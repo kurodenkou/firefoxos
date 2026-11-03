@@ -36,6 +36,10 @@ fi
 kanshi >/dev/null 2>&1 &
 ( sleep 3; firox-displays restore ) >/dev/null 2>&1 &
 
+# Clipboard: keep what you copied after the app closes, and remember
+# recent items for Super+V (Settings > Clipboard, see `firox-clipboard`)
+firox-clipboard start
+
 # Power saving: lock, screen off and sleep timers from Settings >
 # Power Options (~/.config/firox/power.conf, see `firox-power`)
 firox-power start

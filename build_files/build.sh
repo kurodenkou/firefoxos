@@ -58,6 +58,7 @@ PACKAGES=(
     grim
     slurp
     wl-clipboard
+    cliphist                     # clipboard history (firox-clipboard, Super+V)
     brightnessctl
     playerctl
 
@@ -118,6 +119,7 @@ PACKAGES=(
 
     # --- Android apps ---
     waydroid
+    python3-pyclip               # Waydroid shares the clipboard with Android
 )
 
 dnf5 install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
