@@ -10,6 +10,7 @@ settings applets.
     firox-control-panel appearance open Appearance directly
     firox-control-panel power      open Power Options directly
     firox-control-panel screensaver open Screen Saver directly
+    firox-control-panel clipboard  open Clipboard directly
     firox-control-panel accounts   open User Accounts directly
 """
 
@@ -32,6 +33,7 @@ APPLETS = [
     ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["firox-display"]),
     ("preferences-desktop-screensaver", "Screen Saver", "Aquarium, Matrix, Bonsai and more when idle",
      ["@screensaver"]),
+    ("org.kde.plasma.clipboard", "Clipboard", "Copy and paste history (Super+V)", ["@clipboard"]),
     ("preferences-system-power", "Power Options", "Turn off the monitor and sleep when idle", ["@power"]),
     ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
@@ -394,6 +396,83 @@ class ScreenSaverDialog(Gtk.Dialog):
             subprocess.run(["firox-screensaver", "set", sid, str(wait)])
 
 
+class ClipboardDialog(Gtk.Dialog):
+    """Clipboard history settings (firox-clipboard)."""
+
+    def __init__(self, parent):
+        super().__init__(title="Clipboard", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(420, -1)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("org.kde.plasma.clipboard", Gtk.IconSize.DIALOG),
+                          False, False, 0)
+        intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=44)
+        intro.set_markup("Copy with <b>Ctrl+C</b> and paste with <b>Ctrl+V</b> "
+                         "(<b>Ctrl+Shift+C</b> / <b>Ctrl+Shift+V</b> in the Command Prompt). "
+                         "What you copy stays available after you close the app you copied it from.")
+        header.pack_start(intro, True, True, 0)
+        box.pack_start(header, False, False, 0)
+
+        self.values = {}
+        for line in run_text(["firox-clipboard"]).splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                self.values[k] = int(v) if v.isdigit() else 0
+        self.before = dict(self.values)
+
+        self.history = Gtk.CheckButton()
+        self.history.add(Gtk.Label(xalign=0, wrap=True, max_width_chars=44,
+                                   label="Remember what I copy, so I can paste it again later "
+                                         "(press Super+V to choose)"))
+        self.history.set_active(self.values.get("HISTORY", 1) == 1)
+        box.pack_start(self.history, False, False, 0)
+
+        row = Gtk.Box(spacing=8)
+        row.set_margin_start(26)
+        row.pack_start(Gtk.Label(label="Remember up to", xalign=0), False, False, 0)
+        self.max_items = Gtk.SpinButton.new_with_range(5, 1000, 5)
+        self.max_items.set_value(self.values.get("MAX_ITEMS", 100) or 100)
+        row.pack_start(self.max_items, False, False, 0)
+        row.pack_start(Gtk.Label(label="items"), False, False, 0)
+        box.pack_start(row, False, False, 0)
+
+        self.keep = Gtk.CheckButton(label="Keep the history after I log off or restart")
+        self.keep.set_margin_start(26)
+        self.keep.set_active(self.values.get("KEEP_AFTER_RESTART", 0) == 1)
+        box.pack_start(self.keep, False, False, 0)
+
+        clear = Gtk.Button(label="Clear clipboard history")
+        clear.set_halign(Gtk.Align.START)
+        clear.connect("clicked", self.on_clear)
+        box.pack_start(clear, False, False, 4)
+
+        self.history.connect("toggled", lambda _b: self.sync(row))
+        self.sync(row)
+        self.show_all()
+
+    def sync(self, row):
+        on = self.history.get_active()
+        row.set_sensitive(on)
+        self.keep.set_sensitive(on)
+
+    def on_clear(self, btn):
+        subprocess.run(["firox-clipboard", "clear"])
+        btn.set_label("Cleared")
+        btn.set_sensitive(False)
+
+    def apply(self):
+        new = {"HISTORY": int(self.history.get_active()),
+               "MAX_ITEMS": int(self.max_items.get_value()),
+               "KEEP_AFTER_RESTART": int(self.keep.get_active())}
+        changed = [f"{k}={v}" for k, v in new.items() if self.before.get(k) != v]
+        if changed:
+            subprocess.run(["firox-clipboard", "set"] + changed)
+
+
 class PowerDialog(Gtk.Dialog):
     """XP-style Power Options: idle timers for the monitor, lock and sleep."""
 
@@ -699,6 +778,11 @@ class ControlPanel(Gtk.ApplicationWindow):
             if dlg.run() == Gtk.ResponseType.APPLY:
                 dlg.apply()
             dlg.destroy()
+        elif argv == ["@clipboard"]:
+            dlg = ClipboardDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@power"]:
             dlg = PowerDialog(self)
             if dlg.run() == Gtk.ResponseType.APPLY:
@@ -733,7 +817,7 @@ class App(Gtk.Application):
         page = args[0] if args else None
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
                   "accounts": ["@accounts"], "power": ["@power"],
-                  "screensaver": ["@screensaver"],
+                  "screensaver": ["@screensaver"], "clipboard": ["@clipboard"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
@@ -741,7 +825,8 @@ class App(Gtk.Application):
                 self.hold()
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
                        "appearance": AppearanceDialog, "accounts": AccountsDialog,
-                       "power": PowerDialog, "screensaver": ScreenSaverDialog}[page]
+                       "power": PowerDialog, "screensaver": ScreenSaverDialog,
+                       "clipboard": ClipboardDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()
