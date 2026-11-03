@@ -65,14 +65,14 @@ reset-waydroid:
 install-webapp-runtime:
     firefoxpwa runtime install
 
-# Install the Bazaar app store (Flathub) for "Add or Remove Programs"
+# Install the Bazaar app store (Flathub), opened from Start > Bazaar
 [group('Firox Linux')]
 install-app-store:
     #!/usr/bin/bash
     set -euo pipefail
     flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
     flatpak install -y --user flathub io.github.kolunmi.Bazaar
-    echo "Installed. Open Start -> Add or Remove Programs."
+    echo "Installed. Open Start -> Bazaar."
     read -rp "Press Enter to close" _
 
 # Throw away your desktop customisations and go back to the Firox Linux defaults
@@ -126,7 +126,7 @@ dark-mode MODE="":
 
 # Monitor power saving and sleep timers (minutes, 0 = never), e.g.
 #   ujust power-saving MONITOR_AC=10 SLEEP_BATTERY=20
-# Same as Control Panel > Power Options
+# Same as Settings > Power Options
 [group('Firox Linux')]
 power-saving *SETTINGS:
     #!/usr/bin/bash
@@ -141,7 +141,7 @@ power-saving *SETTINGS:
 
 # Screen saver after idle: list them, or pick one ("none" = off) and the wait
 #   ujust screensaver aquarium 5
-# Same as Control Panel > Screen Saver
+# Same as Settings > Screen Saver
 [group('Firox Linux')]
 screensaver ID="" MINUTES="":
     #!/usr/bin/bash

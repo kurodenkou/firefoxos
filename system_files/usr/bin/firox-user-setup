@@ -9,7 +9,7 @@ mkdir -p "$STATE"
 # Preload the Start menu so the first click is instant
 firox-startmenu --daemon &
 
-# My Documents / My Pictures / My Music ...
+# Documents / Pictures / Music ...
 xdg-user-dirs-update
 
 # Firefox web apps need their own Firefox runtime in ~/.local/share/firefoxpwa.

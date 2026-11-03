@@ -9,7 +9,7 @@
     <item label="Command Prompt">
       <action name="Execute" command="foot" />
     </item>
-    <item label="My Computer">
+    <item label="Computer">
       <action name="Execute" command="firox-open computer" />
     </item>
     <separator />

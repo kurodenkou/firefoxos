@@ -8,12 +8,12 @@ wlr-layer-shell overlay so it sits above every window:
     +------------------------------------------+
     | [avatar]  User Name                      |  <- blue header
     +---------------------+--------------------+
-    | Internet  (pinned)  | My Documents       |
-    | Android Apps        | My Pictures        |
-    |---------------------| My Music           |
-    | most-used apps...   | My Computer        |
+    | Internet  (pinned)  | Documents          |
+    | Android Apps        | Pictures           |
+    |---------------------| Music              |
+    | most-used apps...   | Computer           |
     |                     |--------------------|
-    |                     | Control Panel      |
+    |                     | Settings           |
     |---------------------| Web Apps ...       |
     |   All Programs  >   | Help / Search / Run|
     +---------------------+--------------------+
@@ -156,6 +156,33 @@ def app_info(app_id):
         return None
 
 
+BAZAAR_ID = "io.github.kolunmi.Bazaar"
+FLATPAK_ICON_DIRS = [os.path.expanduser("~/.local/share/flatpak/exports/share/icons/hicolor"),
+                     "/var/lib/flatpak/exports/share/icons/hicolor"]
+
+
+def bazaar_icon():
+    """Bazaar's own icon once it's installed (from its Flatpak), else a
+    generic software-store icon."""
+    for base in FLATPAK_ICON_DIRS:
+        for sub, ext in (("scalable", "svg"), ("256x256", "png"), ("128x128", "png"), ("64x64", "png")):
+            path = os.path.join(base, sub, "apps", f"{BAZAAR_ID}.{ext}")
+            if os.path.exists(path):
+                return path
+    if Gtk.IconTheme.get_default().has_icon(BAZAAR_ID):
+        return BAZAAR_ID
+    return "system-software-install"
+
+
+def set_icon(img, icon, size):
+    """Point an existing Gtk.Image at an icon name or image file."""
+    if icon.startswith("/"):
+        img.set_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(icon)), Gtk.IconSize.DIALOG)
+    else:
+        img.set_from_icon_name(icon, Gtk.IconSize.DIALOG)
+    img.set_pixel_size(size)
+
+
 def user_display_name():
     try:
         entry = pwd.getpwuid(os.getuid())
@@ -184,7 +211,7 @@ def avatar_stamp():
 
 
 def set_avatar(img, size):
-    """Show the user's picture (Control Panel > User Accounts sets ~/.face)."""
+    """Show the user's picture (Settings > User Accounts sets ~/.face)."""
     for path in AVATAR_CANDIDATES:
         if os.path.isfile(path):
             try:
@@ -451,16 +478,21 @@ class StartMenu(Gtk.Window):
         def place(icon, title, verb):
             return self._item(icon, title, size=24, on_click=lambda: self.run_open(verb))
 
-        right.pack_start(place("folder-documents", "My Documents", "documents"), False, False, 0)
-        right.pack_start(place("folder-pictures", "My Pictures", "pictures"), False, False, 0)
-        right.pack_start(place("folder-music", "My Music", "music"), False, False, 0)
-        right.pack_start(place("computer", "My Computer", "computer"), False, False, 0)
-        right.pack_start(place("network-workgroup", "My Network Places", "network"), False, False, 0)
+        right.pack_start(place("folder-documents", "Documents", "documents"), False, False, 0)
+        right.pack_start(place("folder-pictures", "Pictures", "pictures"), False, False, 0)
+        right.pack_start(place("folder-music", "Music", "music"), False, False, 0)
+        right.pack_start(place("computer", "Computer", "computer"), False, False, 0)
+        right.pack_start(place("network-workgroup", "Network Places", "network"), False, False, 0)
         right.pack_start(self._sep(), False, False, 0)
-        right.pack_start(self._item("preferences-system", "Control Panel", size=24,
+        right.pack_start(self._item("preferences-system", "Settings", size=24,
                                     on_click=lambda: self.run(["firox-control-panel"])), False, False, 0)
-        right.pack_start(place("system-software-install", "Add or Remove Programs", "software"), False, False, 0)
-        right.pack_start(place("printer", "Printers and Faxes", "printers"), False, False, 0)
+        # Bazaar app store; its icon appears once it's installed
+        self.bazaar_icon = bazaar_icon()
+        bazaar = place("system-software-install", "Bazaar", "software")
+        self.bazaar_img = bazaar.get_child().get_children()[0]
+        set_icon(self.bazaar_img, self.bazaar_icon, 24)
+        right.pack_start(bazaar, False, False, 0)
+        right.pack_start(place("system-config-printer", "Printers and Faxes", "printers"), False, False, 0)
         right.pack_start(self._sep(), False, False, 0)
         right.pack_start(place("help-browser", "Help and Support", "help"), False, False, 0)
         right.pack_start(place("system-search", "Search", "search"), False, False, 0)
@@ -682,6 +714,10 @@ class StartMenu(Gtk.Window):
         if avatar_stamp() != self.avatar_stamp:
             set_avatar(self.avatar, 48)
             self.avatar_stamp = avatar_stamp()
+        icon = bazaar_icon()
+        if icon != self.bazaar_icon:
+            set_icon(self.bazaar_img, icon, 24)
+            self.bazaar_icon = icon
         self._close_dialog()
         self._fill_left()
         self.show_main()

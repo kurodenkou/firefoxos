@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # firox-open VERB — one place for every "open X" action used by the
-# Start menu, taskbar, keybinds and Control Panel.
+# Start menu, taskbar, keybinds and Settings.
 set -u
 
 notify() { notify-send -a Firox -i "${3:-dialog-information}" "$1" "${2:-}" 2>/dev/null || true; }
@@ -51,7 +51,7 @@ case "$verb" in
         if flatpak info io.github.kolunmi.Bazaar >/dev/null 2>&1; then
             exec flatpak run io.github.kolunmi.Bazaar
         fi
-        terminal "Add or Remove Programs" ujust install-app-store
+        terminal "Install Bazaar" ujust install-app-store
         ;;
     update)     terminal "System Update" ujust update ;;
     android)

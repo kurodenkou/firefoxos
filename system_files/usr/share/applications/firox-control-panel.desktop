@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Control Panel
+Name=Settings
+GenericName=Control Panel
 Comment=Change Firox Linux settings
 Exec=firox-control-panel
 Icon=preferences-system
 Categories=Settings;
-Keywords=settings;preferences;system;
+Keywords=settings;preferences;system;control panel;

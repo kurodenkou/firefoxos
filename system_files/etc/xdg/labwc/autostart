@@ -1,10 +1,10 @@
 # Firox Linux session autostart (run by labwc at login).
 # Per-user overrides: ~/.config/labwc/autostart replaces this file.
 
-# Classic or Modern look: see `firox-theme` and Control Panel > Appearance
+# Classic or Modern look: see `firox-theme` and Settings > Appearance
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
 
-# Desktop: wallpaper + My Computer / Recycle Bin icons
+# Desktop: wallpaper + Computer / Recycle Bin icons
 # (~/Desktop etc. must exist before pcmanfm-qt starts)
 xdg-user-dirs-update
 pcmanfm-qt --desktop --profile=firox >/dev/null 2>&1 &
@@ -30,13 +30,13 @@ fi
 # Password prompts for admin tasks
 /usr/libexec/polkit-mate-authentication-agent-1 >/dev/null 2>&1 &
 
-# Monitor layout saved from Control Panel > Display: kanshi applies it (and
+# Monitor layout saved from Settings > Display: kanshi applies it (and
 # re-applies on hotplug); firox-displays then double-checks and fixes
 # anything kanshi couldn't, logging to ~/.local/state/firox/displays.log
 kanshi >/dev/null 2>&1 &
 ( sleep 3; firox-displays restore ) >/dev/null 2>&1 &
 
-# Power saving: lock, screen off and sleep timers from Control Panel >
+# Power saving: lock, screen off and sleep timers from Settings >
 # Power Options (~/.config/firox/power.conf, see `firox-power`)
 firox-power start
 
