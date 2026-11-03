@@ -1,0 +1,52 @@
+#!/usr/bin/python3
+"""Bouncing "firox" screen saver: the logo drifts around and changes colour
+every time it hits an edge."""
+import curses
+import random
+import time
+
+LOGO = [
+    " ___ _                 ",
+    "| __(_)_ _ _____ __    ",
+    "| _|| | '_/ _ \\ \\ /    ",
+    "|_| |_|_| \\___/_\\_\\    ",
+]
+
+
+def main(scr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    colors = [curses.COLOR_CYAN, curses.COLOR_GREEN, curses.COLOR_YELLOW,
+              curses.COLOR_MAGENTA, curses.COLOR_BLUE, curses.COLOR_RED, curses.COLOR_WHITE]
+    for i, c in enumerate(colors, start=1):
+        curses.init_pair(i, c, -1)
+    scr.nodelay(True)
+    w = max(len(line) for line in LOGO)
+    h = len(LOGO)
+    x, y, dx, dy, pair = 0.0, 0.0, 1.0, 0.5, 1
+    while scr.getch() == -1:
+        rows, cols = scr.getmaxyx()
+        max_x, max_y = max(cols - w - 1, 0), max(rows - h - 1, 0)
+        x, y = x + dx, y + dy
+        bounced = False
+        if x <= 0 or x >= max_x:
+            dx, x, bounced = -dx, min(max(x, 0), max_x), True
+        if y <= 0 or y >= max_y:
+            dy, y, bounced = -dy, min(max(y, 0), max_y), True
+        if bounced:
+            pair = random.choice([p for p in range(1, len(colors) + 1) if p != pair])
+        scr.erase()
+        for i, line in enumerate(LOGO):
+            try:
+                scr.addstr(int(y) + i, int(x), line, curses.color_pair(pair) | curses.A_BOLD)
+            except curses.error:
+                pass
+        scr.refresh()
+        time.sleep(0.06)
+
+
+if __name__ == "__main__":
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass

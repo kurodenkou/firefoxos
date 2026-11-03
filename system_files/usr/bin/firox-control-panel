@@ -8,6 +8,7 @@ Firox Linux Control Panel: an XP "classic view" style grid of settings applets.
     firox-control-panel display    open Display directly
     firox-control-panel appearance open Appearance directly
     firox-control-panel power      open Power Options directly
+    firox-control-panel screensaver open Screen Saver directly
     firox-control-panel accounts   open User Accounts directly
 """
 
@@ -28,6 +29,8 @@ from gi.repository import GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 # (icon, title, description, argv)
 APPLETS = [
     ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["firox-display"]),
+    ("preferences-desktop-screensaver", "Screen Saver", "Aquarium, Matrix, Bonsai and more when idle",
+     ["@screensaver"]),
     ("preferences-system-power", "Power Options", "Turn off the monitor and sleep when idle", ["@power"]),
     ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
@@ -299,6 +302,81 @@ def has_battery():
         except OSError:
             pass
     return False
+
+
+class ScreenSaverDialog(Gtk.Dialog):
+    """Pick a screen saver and how long to wait before it starts."""
+
+    def __init__(self, parent):
+        super().__init__(title="Screen Saver", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(400, -1)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("preferences-desktop-screensaver",
+                                                       Gtk.IconSize.DIALOG), False, False, 0)
+        header.pack_start(Gtk.Label(xalign=0, wrap=True, max_width_chars=42,
+                                    label="Show a screen saver when you haven't used the computer "
+                                          "for a while. Move the mouse or press a key to stop it."),
+                          True, True, 0)
+        box.pack_start(header, False, False, 0)
+
+        self.before_id = run_text(["firox-screensaver", "current"]) or "none"
+        wait = run_text(["firox-power", "get", "SCREENSAVER_WAIT"])
+        self.before_wait = int(wait) if wait.isdigit() and int(wait) > 0 else 5
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        grid.attach(Gtk.Label(label="Screen saver:", xalign=0), 0, 0, 1, 1)
+        row = Gtk.Box(spacing=6)
+        self.saver = Gtk.ComboBoxText()
+        self.saver.append("none", "(None)")
+        for line in run_text(["firox-screensaver", "list"]).splitlines():
+            sid, _tab, name = line.partition("\t")
+            self.saver.append(sid, name or sid)
+        self.saver.set_active_id(self.before_id)
+        if self.saver.get_active_id() is None:
+            self.saver.set_active_id("none")
+        row.pack_start(self.saver, True, True, 0)
+        self.preview = Gtk.Button(label="Preview")
+        self.preview.connect("clicked", self.on_preview)
+        row.pack_start(self.preview, False, False, 0)
+        grid.attach(row, 1, 0, 1, 1)
+
+        grid.attach(Gtk.Label(label="Wait:", xalign=0), 0, 1, 1, 1)
+        self.wait = Gtk.ComboBoxText()
+        choices = [m for m in POWER_CHOICES if m]
+        if self.before_wait not in choices:
+            choices = sorted(choices + [self.before_wait])
+        for m in choices:
+            self.wait.append(str(m), minutes_label(m))
+        self.wait.set_active_id(str(self.before_wait))
+        grid.attach(self.wait, 1, 1, 1, 1)
+        box.pack_start(grid, False, False, 0)
+
+        self.saver.connect("changed", lambda _c: self.sync())
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=50)
+        hint.set_markup("<small>Add your own: put a <tt>NAME.conf</tt> with <tt>NAME=</tt> and "
+                        "<tt>COMMAND=</tt> lines in <tt>~/.local/share/firox/screensavers</tt>.</small>")
+        box.pack_start(hint, False, False, 0)
+        self.sync()
+        self.show_all()
+
+    def sync(self):
+        on = self.saver.get_active_id() != "none"
+        self.preview.set_sensitive(on)
+        self.wait.set_sensitive(on)
+
+    def on_preview(self, _btn):
+        spawn(["firox-screensaver", "preview", self.saver.get_active_id()])
+
+    def apply(self):
+        sid = self.saver.get_active_id() or "none"
+        wait = int(self.wait.get_active_id() or self.before_wait)
+        if sid != self.before_id or wait != self.before_wait:
+            subprocess.run(["firox-screensaver", "set", sid, str(wait)])
 
 
 class PowerDialog(Gtk.Dialog):
@@ -595,6 +673,11 @@ class ControlPanel(Gtk.ApplicationWindow):
                 dlg.apply()
                 self.reload_theme()
             dlg.destroy()
+        elif argv == ["@screensaver"]:
+            dlg = ScreenSaverDialog(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@power"]:
             dlg = PowerDialog(self)
             if dlg.run() == Gtk.ResponseType.APPLY:
@@ -629,6 +712,7 @@ class App(Gtk.Application):
         page = args[0] if args else None
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
                   "accounts": ["@accounts"], "power": ["@power"],
+                  "screensaver": ["@screensaver"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
@@ -636,7 +720,7 @@ class App(Gtk.Application):
                 self.hold()
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
                        "appearance": AppearanceDialog, "accounts": AccountsDialog,
-                       "power": PowerDialog}[page]
+                       "power": PowerDialog, "screensaver": ScreenSaverDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()

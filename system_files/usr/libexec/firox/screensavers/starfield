@@ -1,0 +1,41 @@
+#!/usr/bin/python3
+"""Starfield screen saver: flying through space, terminal style."""
+import curses
+import random
+import time
+
+
+def main(scr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    scr.nodelay(True)
+    stars = []
+    while scr.getch() == -1:
+        rows, cols = scr.getmaxyx()
+        cx, cy = cols / 2, rows / 2
+        while len(stars) < 160:
+            stars.append([random.uniform(-cx, cx), random.uniform(-cy, cy) * 2, random.uniform(1, 32)])
+        scr.erase()
+        for s in stars:
+            s[2] -= 0.45
+            if s[2] <= 0.2:
+                s[:] = [random.uniform(-cx, cx), random.uniform(-cy, cy) * 2, 32]
+                continue
+            px, py = int(cx + s[0] * 8 / s[2]), int(cy + s[1] * 4 / s[2])
+            if not (0 <= px < cols - 1 and 0 <= py < rows):
+                s[2] = 0
+                continue
+            ch, attr = (".", curses.A_DIM) if s[2] > 20 else ("+", 0) if s[2] > 9 else ("*", curses.A_BOLD)
+            try:
+                scr.addstr(py, px, ch, attr)
+            except curses.error:
+                pass
+        scr.refresh()
+        time.sleep(0.04)
+
+
+if __name__ == "__main__":
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass
