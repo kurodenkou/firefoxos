@@ -40,8 +40,8 @@
 </nav>
 <article>
 <h2 id="start">The Start menu</h2>
-<p>Click the <b>firox</b> button (or tap the <kbd>Super</kbd> key) to open the Start menu. The left side has your pinned programs and the ones you use most. The right side opens your folders, the Control Panel and system tools. <b>All Programs</b> lists everything installed, grouped into folders; you can also just start typing to search.</p>
-<p>To change the picture at the top of the Start menu, click it (or open <b>Control Panel &rarr; User Accounts</b>) and pick one of the built-in pictures or <b>Browse for more pictures&hellip;</b> to use your own photo.</p>
+<p>Click the <b>firox</b> button (or tap the <kbd>Super</kbd> key) to open the Start menu. The left side has your pinned programs and the ones you use most. The right side opens your folders, Settings, the Bazaar app store and system tools. <b>All Programs</b> lists everything installed, grouped into folders; you can also just start typing to search.</p>
+<p>To change the picture at the top of the Start menu, click it (or open <b>Settings &rarr; User Accounts</b>) and pick one of the built-in pictures or <b>Browse for more pictures&hellip;</b> to use your own photo.</p>
 
 <h2 id="webapps">Web apps</h2>
 <p>Firox Linux turns websites into apps with <b>PWAsForFirefox</b>. Each web app gets its own window, taskbar button and Start menu entry, and runs in its own Firefox profile.</p>
@@ -67,8 +67,8 @@
 <p>If Secure Boot is turned on, run <code>ujust enroll-secure-boot-key</code> before restarting, then choose <b>Enroll MOK</b> on the blue screen at the next boot and enter <code>universalblue</code>.</p>
 
 <h2 id="sound">No sound?</h2>
-<p>First check <b>Control Panel &rarr; Sounds and Audio Devices</b>: make sure the right output is selected and nothing is muted.</p>
-<p>Some PCs with <b>Realtek</b> onboard audio stay silent or crackle on Linux. <b>Control Panel &rarr; Sound Troubleshooter</b> runs <a href="https://github.com/hello2himel/linux-audio-fix">linux-audio-fix</a>, which detects your chip, shows what it will change and asks before doing anything. It turns off Auto-Mute, sends the chip's startup commands, and sets them to be re-applied at every boot. It saves a backup first.</p>
+<p>First check <b>Settings &rarr; Sounds and Audio Devices</b>: make sure the right output is selected and nothing is muted.</p>
+<p>Some PCs with <b>Realtek</b> onboard audio stay silent or crackle on Linux. <b>Settings &rarr; Sound Troubleshooter</b> runs <a href="https://github.com/hello2himel/linux-audio-fix">linux-audio-fix</a>, which detects your chip, shows what it will change and asks before doing anything. It turns off Auto-Mute, sends the chip's startup commands, and sets them to be re-applied at every boot. It saves a backup first.</p>
 <table>
   <tr><td><code>ujust fix-realtek-audio</code></td><td>Guided fix</td></tr>
   <tr><td><code>ujust fix-realtek-audio --dry-run</code></td><td>Preview only, changes nothing</td></tr>
@@ -79,15 +79,15 @@
 <p>It only applies to Realtek HD-Audio chips. USB audio (such as ALC4080 on some motherboards) and newer Intel laptops that use SOF firmware need different fixes; the tool tells you if that's your case.</p>
 
 <h2 id="software">Installing software</h2>
-<p>Firox Linux is an <em>image-based</em> system: the OS itself is read-only and updates as one piece. Install apps as web apps, Android apps or <b>Flatpaks</b> (<b>Control Panel &rarr; Add or Remove Programs</b>). For command-line tools, use a <code>toolbox</code> or <code>distrobox</code> container.</p>
+<p>Firox Linux is an <em>image-based</em> system: the OS itself is read-only and updates as one piece. Install apps as web apps, Android apps or <b>Flatpaks</b> (<b>Start &rarr; Bazaar</b>). For command-line tools, use a <code>toolbox</code> or <code>distrobox</code> container.</p>
 
 <h2 id="updates">Updates</h2>
-<p>The system updates itself in the background, and the new version takes effect when you restart. To update now, open <b>Control Panel &rarr; System Update</b> or run <code>ujust update</code>.</p>
+<p>The system updates itself in the background, and the new version takes effect when you restart. To update now, open <b>Settings &rarr; System Update</b> or run <code>ujust update</code>.</p>
 
 <h2 id="keys">Keyboard shortcuts</h2>
 <table>
   <tr><td><kbd>Super</kbd></td><td>Start menu</td></tr>
-  <tr><td><kbd>Super</kbd>+<kbd>E</kbd></td><td>My Computer</td></tr>
+  <tr><td><kbd>Super</kbd>+<kbd>E</kbd></td><td>Computer</td></tr>
   <tr><td><kbd>Super</kbd>+<kbd>R</kbd></td><td>Run...</td></tr>
   <tr><td><kbd>Super</kbd>+<kbd>D</kbd></td><td>Show desktop</td></tr>
   <tr><td><kbd>Super</kbd>+<kbd>L</kbd></td><td>Lock computer</td></tr>
@@ -95,11 +95,11 @@
   <tr><td><kbd>Alt</kbd>+<kbd>Tab</kbd></td><td>Switch windows</td></tr>
   <tr><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>Close window</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Del</kbd></td><td>Task Manager</td></tr>
-  <tr><td><kbd>Print Screen</kbd></td><td>Screenshot to My Pictures (<kbd>Shift</kbd> to select an area)</td></tr>
+  <tr><td><kbd>Print Screen</kbd></td><td>Screenshot to Pictures (<kbd>Shift</kbd> to select an area)</td></tr>
 </table>
 
 <h2 id="display">Screen resolution and monitors</h2>
-<p>Open <b>Control Panel &rarr; Display</b>, change resolution, refresh rate, scale or arrangement, and close the window. Your layout is saved when you close it and comes back at every login. Each combination of monitors (for example, laptop alone vs. docked) remembers its own layout. If you write your own <code>~/.config/kanshi/config</code>, Firox leaves it alone. If a layout doesn't come back, the details are in <code>~/.local/state/firox/displays.log</code>.</p>
+<p>Open <b>Settings &rarr; Display</b>, change resolution, refresh rate, scale or arrangement, and close the window. Your layout is saved when you close it and comes back at every login. Each combination of monitors (for example, laptop alone vs. docked) remembers its own layout. If you write your own <code>~/.config/kanshi/config</code>, Firox leaves it alone. If a layout doesn't come back, the details are in <code>~/.local/state/firox/displays.log</code>.</p>
 
 <h2 id="customize">Customizing</h2>
 <p>The desktop is <b>labwc</b> (window manager), <b>waybar</b> (taskbar) and <b>pcmanfm-qt</b> (desktop icons and wallpaper). Run <code>ujust customize-desktop</code> to copy the defaults into <code>~/.config</code>, where you can edit them. <code>ujust reset-desktop</code> puts the defaults back.</p>

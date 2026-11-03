@@ -2,7 +2,7 @@
 
 A desktop Linux built on [Universal Blue](https://universal-blue.org/) (Fedora Atomic): image-based, self-updating, with a familiar classic desktop layout. It includes:
 
-- **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **start** button, a two-column Start menu, Quick Launch, notification area, desktop icons and a Control Panel. It comes in two looks: **Modern** (grey and translucent, with dark apps; the default) and **Classic** (blue "Luna"-style with a green start button).
+- **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **firox** button, a two-column Start menu, Quick Launch, notification area, desktop icons and Settings (an XP-style Control Panel). It comes in two looks: **Modern** (grey and translucent, with dark apps; the default) and **Classic** (blue "Luna"-style with a green start button).
 - **Web apps as first-class apps** with Firefox + [PWAsForFirefox](https://pwasforfirefox.filips.si/) (`firefoxpwa`): install any site as a desktop app with its own window, taskbar button and Start menu entry.
 - **Android apps** with [Waydroid](https://waydro.id/), integrated into the Start menu.
 
@@ -34,7 +34,7 @@ The login screen matches the default look:
 
 Want Modern with light apps, or Classic with dark ones? The Appearance window also has a **Programs** setting: **Match the look** (the default), **Light** or **Dark**. Light or Dark keeps apps that way whichever look you choose. From a terminal: `ujust dark-mode on|off|auto` (or `firox-theme apps dark|light|auto`).
 
-Switch looks in **Control Panel → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
+Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
@@ -44,21 +44,21 @@ Switch looks in **Control Panel → Appearance**, or with `ujust theme modern` /
 |---|---|
 | Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `Firox-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
 | Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock |
-| Start menu | `firox-startmenu`: Python + GTK3 + gtk-layer-shell. A **firox** button, user picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), My Documents / Pictures / Music / Computer, Control Panel, Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
-| Desktop | `pcmanfm-qt --desktop`: wallpaper plus My Computer / Home / Recycle Bin / Network icons |
-| Control Panel | `firox-control-panel`: Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Add or Remove Programs, Date and Time, **User Accounts** (change your account picture from a built-in set or any image, or your password; also opened by clicking the picture in the Start menu), System... |
+| Start menu | `firox-startmenu`: Python + GTK3 + gtk-layer-shell. A **firox** button, user picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), Documents / Pictures / Music / Computer / Network Places, Settings, **Bazaar** (app store), Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
+| Desktop | `pcmanfm-qt --desktop`: wallpaper plus Computer / Home / Recycle Bin / Network icons |
+| Settings | `firox-control-panel` (the Control Panel): Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Bazaar, Date and Time, **User Accounts** (change your account picture from a built-in set or any image, or your password; also opened by clicking the picture in the Start menu), System... |
 | Web Apps | `firox-webapps`: list, open and remove installed PWAs |
 | Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
-| Displays | **Control Panel → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
-| Power saving | **Control Panel → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
-| Screen savers | **Control Panel → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
+| Displays | **Settings → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
+| Power saving | **Settings → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
+| Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
 ![Power Options on a laptop](docs/screenshots/power-options.png)
 
 ### Keyboard shortcuts
 
-`Super` Start menu · `Super+E` My Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+←/→` snap · `Alt+Tab` switch windows · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot
+`Super` Start menu · `Super+E` Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+←/→` snap · `Alt+Tab` switch windows · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot
 
 ## Repository layout
 
@@ -138,7 +138,7 @@ From then on it updates normally (`ujust update`). On your first login afterward
 
 - **Web apps:** the Firefox runtime for web apps downloads in the background on first login. Open a site in Firefox, click the PWAsForFirefox toolbar button and choose **Install**.
 - **Android:** open **Start → Android Apps**. The first time, it runs `ujust setup-waydroid` to download Android. Use `ujust setup-waydroid gapps` for the Play Store.
-- **More apps:** **Control Panel → Add or Remove Programs** installs the Bazaar Flatpak store.
+- **More apps:** **Start → Bazaar** opens the Bazaar Flatpak app store (the first time, it offers to install it).
 
 ### `ujust` recipes
 
@@ -147,7 +147,7 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust setup-waydroid [vanilla\|gapps]` | Download and initialise Android |
 | `ujust waydroid-google-id` | Print the Android ID to register a GAPPS install |
 | `ujust reset-waydroid` | Delete Android and its data |
-| `ujust fix-realtek-audio` | Fix silent/crackling Realtek onboard audio ([linux-audio-fix](https://github.com/hello2himel/linux-audio-fix), pinned + checksum-verified; also in Control Panel → Sound Troubleshooter) |
+| `ujust fix-realtek-audio` | Fix silent/crackling Realtek onboard audio ([linux-audio-fix](https://github.com/hello2himel/linux-audio-fix), pinned + checksum-verified; also in Settings → Sound Troubleshooter) |
 | `ujust install-webapp-runtime` | (Re)install the firefoxpwa Firefox runtime |
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
 | `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
@@ -171,11 +171,11 @@ NAME=Pipes
 COMMAND=pipes.sh
 ```
 
-It shows up in **Control Panel → Screen Saver** straight away. It runs full screen in a black terminal and stops when you move the mouse or press a key. For a program that opens its own window instead, add `TERMINAL=false`. `COMMAND` can be a script you drop in `~/.local/bin` (handy for single-file savers such as `pipes.sh`) or any other program on your `PATH`. The built-in ones live in `/usr/share/firox/screensavers/`. The default for new users is in `/etc/firox/screensaver` (`none`).
+It shows up in **Settings → Screen Saver** straight away. It runs full screen in a black terminal and stops when you move the mouse or press a key. For a program that opens its own window instead, add `TERMINAL=false`. `COMMAND` can be a script you drop in `~/.local/bin` (handy for single-file savers such as `pipes.sh`) or any other program on your `PATH`. The built-in ones live in `/usr/share/firox/screensavers/`. The default for new users is in `/etc/firox/screensaver` (`none`).
 
 ### Everything else
 
-Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Control Panel → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
+Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Settings → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 
@@ -186,4 +186,4 @@ GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner
 - Waydroid needs a GPU it supports for hardware acceleration (Intel/AMD are fine; on NVIDIA it runs with software rendering) and doesn't work on Secure Boot setups that block the binder module from loading.
 - The NVIDIA image only supports cards from the GTX 16 / RTX 20 series onwards (NVIDIA's open driver).
 - The PWAsForFirefox extension is installed by Firefox policy on first launch, so Firefox needs network access the first time.
-- The Start menu, Control Panel and Web Apps manager are new code and haven't been tested much on real hardware yet.
+- The Start menu, Settings and Web Apps manager are new code and haven't been tested much on real hardware yet.

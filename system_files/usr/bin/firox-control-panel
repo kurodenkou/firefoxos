@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """
-Firox Linux Control Panel: an XP "classic view" style grid of settings applets.
+Firox Linux Settings (the Control Panel): an XP "classic view" style grid of
+settings applets.
 
     firox-control-panel            open the panel
     firox-control-panel system     open System Properties directly
@@ -45,7 +46,7 @@ APPLETS = [
     ("drive-harddisk", "Disk Management", "Drives, partitions and USB sticks", ["gnome-disks"]),
     ("applications-internet", "Web Apps", "Install and remove Firefox web apps", ["firox-webapps"]),
     ("waydroid", "Android Apps", "Waydroid Android container", ["firox-open", "android"]),
-    ("system-software-install", "Add or Remove Programs", "Browse and install Flatpak apps", ["firox-open", "software"]),
+    ("system-software-install", "Bazaar", "Browse and install apps (Flatpak)", ["firox-open", "software"]),
     ("system-software-update", "System Update", "Update Firox Linux, Flatpaks and toolboxes", ["firox-open", "update"]),
     ("preferences-system-time", "Date and Time", "Time zone and clock synchronisation", ["@datetime"]),
     ("system-users", "User Accounts", "Change your picture or password", ["@accounts"]),
@@ -54,6 +55,20 @@ APPLETS = [
 ]
 
 THEMES_DIR = "/usr/share/firox/themes"
+BAZAAR_ID = "io.github.kolunmi.Bazaar"
+
+
+def bazaar_icon():
+    """Bazaar's own icon once it's installed (from its Flatpak), else a generic one."""
+    for base in (os.path.expanduser("~/.local/share/flatpak/exports/share/icons/hicolor"),
+                 "/var/lib/flatpak/exports/share/icons/hicolor"):
+        for sub, ext in (("scalable", "svg"), ("256x256", "png"), ("128x128", "png"), ("64x64", "png")):
+            path = os.path.join(base, sub, "apps", f"{BAZAAR_ID}.{ext}")
+            if os.path.exists(path):
+                return path
+    if Gtk.IconTheme.get_default().has_icon(BAZAAR_ID):
+        return BAZAAR_ID
+    return "system-software-install"
 
 
 def current_theme():
@@ -577,7 +592,7 @@ class AccountsDialog(Gtk.Dialog):
 
 class ControlPanel(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Control Panel")
+        super().__init__(application=app, title="Settings")
         self.set_default_size(820, 560)
         self.set_icon_name("preferences-system")
 
@@ -595,13 +610,13 @@ class ControlPanel(Gtk.ApplicationWindow):
         sidebar.pack_start(self._panel("See Also", [
             ("Help and Support", ["firox-open", "help"]),
             ("System Update", ["firox-open", "update"]),
-            ("My Computer", ["firox-open", "computer"]),
+            ("Computer", ["firox-open", "computer"]),
         ]), False, False, 0)
         root.pack_start(sidebar, False, False, 0)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.set_name("content")
-        heading = Gtk.Label(label="Control Panel", xalign=0)
+        heading = Gtk.Label(label="Settings", xalign=0)
         heading.set_name("heading")
         content.pack_start(heading, False, False, 0)
 
@@ -620,7 +635,13 @@ class ControlPanel(Gtk.ApplicationWindow):
             child = Gtk.FlowBoxChild()
             row = Gtk.Box(spacing=10)
             row.set_size_request(180, -1)
-            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
+            if title == "Bazaar":
+                icon = bazaar_icon()
+            if icon.startswith("/"):
+                img = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(icon)),
+                                               Gtk.IconSize.DIALOG)
+            else:
+                img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
             img.set_pixel_size(40)
             row.pack_start(img, False, False, 0)
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

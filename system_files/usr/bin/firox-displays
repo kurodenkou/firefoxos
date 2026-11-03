@@ -2,7 +2,7 @@
 """
 firox-displays: remember and restore the monitor layout.
 
-    firox-displays save [--quiet]   save the live layout (Control Panel > Display
+    firox-displays save [--quiet]   save the live layout (Settings > Display
                                     runs this when the settings window closes)
     firox-displays restore          at login: make the screens match the saved
                                     layout if kanshi didn't (or couldn't)
