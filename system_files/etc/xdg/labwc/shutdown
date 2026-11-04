@@ -1,3 +1,4 @@
 # Run by labwc when the session ends
+pkill -u "$USER" -x firox-panel
 pkill -u "$USER" -x waybar
 pkill -u "$USER" -x swayidle

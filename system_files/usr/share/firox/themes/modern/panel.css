@@ -1,0 +1,105 @@
+/*
+ * Firox Linux "Modern" taskbar (firox-panel): same layout as Classic (start
+ * button, Quick Launch, window buttons, notification area, clock), in plain
+ * translucent grey. Your own rules go in ~/.config/firox/panel.css.
+ */
+
+/* only the taskbar runs in this process: start from bare buttons
+   (a plain selector, so every rule below wins over it) */
+button {
+    all: unset;
+}
+* {
+    font-family: "Noto Sans", "DejaVu Sans", "Font Awesome 6 Free", sans-serif;
+    font-size: 12px;
+}
+
+window#panel {
+    color: #e8e8e8;
+    background-color: rgba(32, 32, 32, 0.78);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+tooltip {
+    background: rgba(40, 40, 40, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+tooltip label { color: #e8e8e8; }
+
+/* ---- start button ---- */
+#custom-start {
+    color: #f0f0f0;
+    font-size: 13px;
+    padding: 0 14px 0 34px;
+    margin-right: 4px;
+    background-image: url("/usr/share/firox/icons/start-orb-mono.svg");
+    background-repeat: no-repeat;
+    background-position: 9px center;
+    background-size: 18px 18px;
+    background-color: rgba(255, 255, 255, 0.06);
+}
+#custom-start:hover { background-color: rgba(255, 255, 255, 0.14); }
+#custom-start:active { background-color: rgba(255, 255, 255, 0.20); }
+
+/* ---- quick launch ---- */
+button.quick-launch { padding: 0 4px; border-radius: 3px; }
+button.quick-launch:hover { background-color: rgba(255, 255, 255, 0.12); }
+#custom-ql-sep {
+    margin: 6px 6px 6px 4px;
+    min-width: 0;
+    background: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* ---- window buttons ---- */
+#taskbar { margin-left: 2px; }
+#taskbar button {
+    color: #d8d8d8;
+    padding: 0 8px;
+    margin: 3px 2px 3px 0;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-bottom: 2px solid transparent;
+}
+#taskbar button:hover { background-color: rgba(255, 255, 255, 0.12); }
+#taskbar button.active {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.16);
+    border-bottom: 2px solid #b0b0b0;
+}
+#taskbar button.minimized label { color: #9a9a9a; }
+/* grouped windows: "3  Firefox  ▴" */
+#taskbar button .count {
+    font-weight: bold;
+    min-width: 8px;
+}
+#taskbar button .arrow { font-size: 9px; color: #b0b0b0; }
+
+/* ---- notification area ---- */
+#notification-area {
+    border-left: 1px solid rgba(255, 255, 255, 0.10);
+    padding-left: 6px;
+}
+#notification-area button {
+    color: #e8e8e8;
+    padding: 0 5px;
+    border-radius: 3px;
+}
+#notification-area button:hover { background-color: rgba(255, 255, 255, 0.12); }
+#tray button { padding: 0 3px; }
+#idle_inhibitor label, #pulseaudio label, #battery label,
+#custom-updates label, #custom-notifications label {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+}
+#idle_inhibitor.activated { color: #ffffff; }
+#idle_inhibitor.deactivated { color: #a8a8a8; }
+#battery.warning { color: #e0c070; }
+#battery.critical { color: #e08080; }
+#clock { padding: 0 12px 0 8px; }
+
+#custom-notifications.read, #custom-notifications.dnd { color: #a8a8a8; }
+
+/* update waiting for a restart (firox-updates) */
+#custom-updates.pending { color: #ffffff; }

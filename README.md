@@ -45,7 +45,7 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Piece | What it is |
 |---|---|
 | Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `Firox-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
-| Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock. Click a window button to show or minimise it, right-click to bring it forward (then **Alt+Space** for its window menu), middle-click to close it. Click the speaker for a volume slider with Mute and a choice of speakers/headphones (`firox-volume`). Its click actions start programs through `firox-launch`, so a program left running can't freeze a taskbar item |
+| Taskbar | `firox-panel` (GTK, layer-shell; window list over wlr-foreign-toplevel-management with pywayland): start button, Quick Launch, window buttons, notification area (app tray icons, keep the screen on, volume, battery, update, notifications), clock, on every monitor with that monitor's windows. **Windows of the same app share one button** ("3  Foot ▴"): click it to pick a window. Click a window button to show or minimise it; right-click for Restore / Minimize / Maximize / Close (or Minimize/Close group); middle-click closes. Right-click an empty part of the taskbar to turn grouping off, or for Task Manager and Settings. Click the speaker for a volume slider with Mute and a choice of speakers/headphones (`firox-volume`). Styled by the theme's `panel.css`; your own rules go in `~/.config/firox/panel.css`. waybar is kept as a fallback (and runs instead if you set up `~/.config/waybar`) |
 | Start menu | `firox-startmenu`: Python + GTK3 + gtk-layer-shell. A **firox** button, user picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), Documents / Pictures / Music / Computer / Network Places, Settings, **Bazaar** (app store), Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus Computer / Home / Recycle Bin / Network icons |
 | Settings | `firox-control-panel` (the Control Panel): Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Bazaar, Date and Time, **User Accounts** (change your account picture from a built-in set or any image, or your password; also opened by clicking the picture in the Start menu), System... |
@@ -53,7 +53,7 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Login | `firox-welcome`, a greetd greeter in cage (`firox-greeter`): "To begin, click your user name" with everyone's account picture, Other user… for accounts not listed, and Turn off computer (sleep, turn off, restart). Styled to match the default look in `/etc/firox/theme`. Pictures come from AccountsService (`/var/lib/AccountsService/icons`), which Settings → User Accounts updates. Uses the keyboard layout chosen when installing. Falls back to gtkgreet if it can't start |
 | Displays | **Settings → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
 | Mouse and keyboard | **Settings → Mouse**: pointer speed and acceleration, left-handed buttons, double-click speed, pointer size, scroll speed, natural scrolling, and a Touchpad tab (tap to click, two-finger or edge scrolling, right-click method, ignore while typing, off when a mouse is plugged in). **Settings → Keyboard**: repeat delay and rate, Num Lock at login, keyboard layouts with variants and a switching shortcut. Stored by `firox-input` in `~/.config/firox/input.conf`; it writes complete labwc config files to `~/.local/share/firox/xdg/labwc`, which labwc reads after `~/.config/labwc` (so a personal rc.xml still wins). The layout chosen when installing is the default |
-| Notifications | mako pop-ups, plus a bell in the notification area (`firox-notifications`): it counts the ones you haven't seen (closing a pop-up counts as seeing it; ones that time out on their own stay counted) and opens a panel with the last 100 notifications (click one to open its app). **Do Not Disturb** (in the panel, or right-click the bell) holds pop-ups except urgent ones. Pop-ups are also held while a screen saver runs |
+| Notifications | mako pop-ups, plus a bell in the notification area (`firox-notifications`) that opens a panel with the last 100 notifications (click one to open its app). **Do Not Disturb** (in the panel, or right-click the bell) holds pop-ups except urgent ones. Pop-ups are also held while a screen saver runs |
 | Volume and brightness keys | `firox-osd`: the volume, mute, microphone-mute and brightness keys show a small level popup at the bottom of the screen (also with Do Not Disturb on, and on the lock screen). Volume up unmutes; brightness never goes fully black |
 | Updates | Updates download in the background and apply at the next restart. When one is waiting, an icon appears in the notification area (`firox-updates`): click it to restart, right-click to see which packages change. You also get a notification once per update, and "Firox Linux was updated" after restarting |
 | Snipping Tool | `firox-snip` (Start → All Programs, or **Super+Shift+S** to go straight to selecting): snip a rectangle, the whole screen or one monitor, with an optional 3/5/10 second delay. Each snip is copied to the clipboard; mark it up with a pen or highlighter, then Copy, Save (to Pictures/Screenshots) or Save As (PNG or JPEG). **Print Screen** still saves the whole screen straight to Pictures, and **Shift+Print Screen** saves an area there |
@@ -62,6 +62,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Power saving | **Settings → Power Options** (`firox-power`): on laptops, low-battery warnings (10%, then urgently at 5%) and at 3% the computer goes to sleep (or hibernates or shuts down, as you choose) after a 15-second warning. Also: turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
 | Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen on every monitor after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
+
+![Taskbar: a group of three terminals opened, the same windows ungrouped, and the Modern look](docs/screenshots/taskbar.png)
 
 ![Power Options on a laptop](docs/screenshots/power-options.png)
 
@@ -94,7 +96,7 @@ Containerfile                 FROM ghcr.io/ublue-os/base-main, runs build.sh
 build_files/build.sh          repos, packages, services, branding
 system_files/                 copied onto / in the image
   etc/xdg/labwc/              compositor config, keybinds, autostart
-  etc/xdg/waybar/             taskbar layout + Luna CSS
+  etc/xdg/waybar/             fallback taskbar (firox-panel is the default)
   etc/greetd/                 login screen
   etc/firefox/policies/       auto-installs the PWAsForFirefox extension
   usr/bin/firox-*         start menu, control panel, web apps, helpers
@@ -177,7 +179,7 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust fix-realtek-audio` | Fix silent/crackling Realtek onboard audio ([linux-audio-fix](https://github.com/hello2himel/linux-audio-fix), pinned + checksum-verified; also in Settings → Sound Troubleshooter) |
 | `ujust install-webapp-runtime` | (Re)install the firefoxpwa Firefox runtime |
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
-| `ujust customize-desktop` | Copy labwc/waybar defaults into `~/.config` to edit |
+| `ujust customize-desktop` | Copy the labwc defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
 | `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
 | `ujust screensaver [ID] [MINUTES]` | List screen savers, or pick one (`none` turns them off) and how long to wait |

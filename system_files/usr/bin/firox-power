@@ -8,6 +8,9 @@
 #   firox-power start               (re)start the idle watcher (used at login)
 #   firox-power battery             battery level and state
 #   firox-power battery-watch       low-battery warnings (runs from login)
+#   firox-power awake [on|off|toggle]
+#                                   keep the screen on: pause the timers
+#                                   below until turned off or you log off
 #
 # Keys (minutes, 0 = never):
 #   MONITOR_AC  MONITOR_BATTERY     turn the screen off when idle
@@ -29,6 +32,7 @@ SYS_CONF=/etc/firox/power.conf
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/firox/power.conf"
 KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE SCREENSAVER_WAIT BATTERY_LOW BATTERY_CRITICAL BATTERY_ACTION BATTERY_ACTION_KIND"
 PS="${FIROX_POWER_SUPPLY:-/sys/class/power_supply}"
+AWAKE="${XDG_RUNTIME_DIR:-/tmp}/firox-stay-awake"
 
 get() {
     local v=""
@@ -141,6 +145,8 @@ battery_watch() {
 
 start() {
     pkill -u "$USER" -x swayidle
+    # "Keep the screen on" (taskbar): no timers until it's turned off
+    [ -e "$AWAKE" ] && return 0
     local args=(-w) m src
     m="$(get SCREENSAVER_WAIT)"
     if [ "$m" -gt 0 ] && [ "$(firox-screensaver current)" != none ]; then
@@ -188,6 +194,15 @@ case "${1:-show}" in
         start
         ;;
     start) start ;;
+    awake)
+        case "${2:-status}" in
+            on)     touch "$AWAKE"; start ;;
+            off)    rm -f "$AWAKE"; start ;;
+            toggle) if [ -e "$AWAKE" ]; then rm -f "$AWAKE"; else touch "$AWAKE"; fi; start ;;
+            status) [ -e "$AWAKE" ] && echo on || echo off ;;
+            *)      echo "usage: firox-power awake [on|off|toggle]" >&2; exit 2 ;;
+        esac
+        ;;
     battery)
         has_battery || { echo "no battery"; exit 1; }
         battery_level
@@ -208,7 +223,7 @@ case "${1:-show}" in
         esac
         ;;
     *)
-        sed -n '2,27s/^# \{0,1\}//p' "$0" >&2
+        sed -n '2,30s/^# \{0,1\}//p' "$0" >&2
         exit 2
         ;;
 esac

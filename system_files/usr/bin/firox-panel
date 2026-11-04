@@ -1,0 +1,1548 @@
+#!/usr/bin/python3
+"""
+firox-panel: the Firox Linux taskbar.
+
+    firox-panel             run the taskbar (started at login)
+
+One bar along the bottom of every monitor:
+
+    start button | Quick Launch | window buttons | notification area | clock
+
+Window buttons are grouped: when an app has two or more windows open they
+share one button ("3  Firefox ▴"); click it to pick a window. Right-click a
+button for Restore / Minimize / Maximize / Close, or Minimize/Close group.
+Right-click an empty part of the taskbar to turn grouping off.
+
+The notification area holds app icons (StatusNotifierItem, e.g. network and
+Bluetooth), keep the screen on, volume, battery, a waiting update, the
+notification bell and the clock.
+
+Styled by the theme's panel.css (/usr/share/firox/themes/NAME/panel.css),
+reloaded when the theme changes; add your own rules in
+~/.config/firox/panel.css. Settings: ~/.config/firox/panel.conf (GROUP=1|0).
+
+Exits with status 3 if it can't run here (no layer-shell or window list
+support, or a missing library); the session then starts waybar instead.
+"""
+
+import glob
+import json
+import os
+import re
+import struct
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, "/usr/lib/firox/python")
+
+CANT_RUN = 3
+
+
+def cant_run(why):
+    print(f"firox-panel: {why}", file=sys.stderr)
+    sys.exit(CANT_RUN)
+
+
+try:
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("GdkPixbuf", "2.0")
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, GtkLayerShell  # noqa: E402
+    from pywayland.client import Display  # noqa: E402
+    from pywayland.protocol.wayland import WlOutput, WlSeat  # noqa: E402
+    from pywayland.protocol.xdg_output_unstable_v1 import ZxdgOutputManagerV1  # noqa: E402
+    from firox_wlr_toplevel import ZwlrForeignToplevelManagerV1  # noqa: E402
+except (ImportError, ValueError) as err:
+    cant_run(f"missing library: {err}")
+
+THEMES = "/usr/share/firox/themes"
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "firox")
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
+SETTINGS = os.path.join(CONFIG, "panel.conf")
+AWAKE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "firox-stay-awake")
+HEIGHT = 30
+ICON = 16
+
+# Font Awesome glyphs (the same ones the theme's fonts provide for waybar)
+FA_EYE, FA_EYE_SLASH = "", ""
+FA_VOLUME = ("", "", "")
+FA_MUTED = ""
+FA_BATTERY = ("", "", "", "", "")
+FA_CHARGING = ""
+FA_BELL, FA_BELL_OFF = "", ""
+
+QUICK_LAUNCH = [
+    # (icon, command, tooltip)
+    ("show-desktop", ["firox-open", "show-desktop"], "Show the desktop"),
+    ("firefox", ["firefox"], "Firefox"),
+    ("system-file-manager", ["firox-open", "computer"], "Computer"),
+]
+
+
+# ------------------------------------------------------- pywayland patch --
+
+def patch_pywayland():
+    """pywayland (0.4) can't take objects the compositor creates in an event
+    (a new_id argument), which is how wlr-foreign-toplevel-management hands
+    out each window. Wrap those in a proxy of their interface, the way
+    pywayland does for objects created by a request."""
+    from pywayland import ffi, lib
+    from pywayland.protocol_core.argument import ArgumentType
+    from pywayland.protocol_core.message import Message
+
+    original = Message.c_to_arguments
+    if getattr(original, "firox_patched", False):
+        return
+
+    def c_to_arguments(self, args_ptr):
+        if not any(a.argument_type == ArgumentType.NewId for a in self.arguments):
+            return original(self, args_ptr)
+        args = []
+        for i, argument in enumerate(self.arguments):
+            arg = args_ptr[i]
+            kind = argument.argument_type
+            if kind == ArgumentType.NewId:
+                args.append(argument.interface.proxy_class(arg.o, DISPLAY))
+            elif kind == ArgumentType.Int:
+                args.append(arg.i)
+            elif kind == ArgumentType.Uint:
+                args.append(arg.u)
+            elif kind == ArgumentType.Fixed:
+                args.append(lib.wl_fixed_to_double(arg.f))
+            elif kind == ArgumentType.FileDescriptor:
+                args.append(arg.h)
+            elif kind == ArgumentType.String:
+                args.append(None if arg.s == ffi.NULL else ffi.string(arg.s).decode())
+            elif kind == ArgumentType.Object:
+                args.append(None if arg.o == ffi.NULL else
+                            argument.interface.registry.get(ffi.cast("struct wl_proxy *", arg.o)))
+            elif kind == ArgumentType.Array:
+                args.append(ffi.buffer(arg.a.data, arg.a.size)[:])
+            else:
+                raise ValueError(f"unknown argument type {kind}")
+        return args
+
+    c_to_arguments.firox_patched = True
+    Message.c_to_arguments = c_to_arguments
+
+
+DISPLAY = None
+
+
+# --------------------------------------------------------------- helpers --
+
+def spawn(argv):
+    """Start a program. GLib closes our open files in the child, so nothing
+    it keeps running can hold on to the taskbar's pipes."""
+    try:
+        GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
+    except GLib.Error as err:
+        print(f"firox-panel: can't run {argv[0]}: {err.message}", file=sys.stderr)
+
+
+def read(path):
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def theme_name():
+    return read(os.path.join(CONFIG, "theme")) or read("/etc/firox/theme") or "classic"
+
+
+def theme_css():
+    path = os.path.join(THEMES, theme_name(), "panel.css")
+    return path if os.path.exists(path) else os.path.join(THEMES, "classic", "panel.css")
+
+
+def load_settings():
+    out = {"GROUP": "1"}
+    for line in read(SETTINGS).splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def save_setting(key, value):
+    s = load_settings()
+    s[key] = value
+    os.makedirs(CONFIG, exist_ok=True)
+    with open(SETTINGS, "w") as fh:
+        fh.write("# firox-panel settings\n")
+        for k, v in s.items():
+            fh.write(f"{k}={v}\n")
+
+
+def popup_menu(menu, widget, event):
+    """Open a menu above a taskbar widget."""
+    menu.show_all()
+    menu.attach_to_widget(widget, None)
+    menu.popup_at_widget(widget, Gdk.Gravity.NORTH_WEST, Gdk.Gravity.SOUTH_WEST, event)
+
+
+def menu_item(label, callback=None, sensitive=True, icon=None, bold=False):
+    item = Gtk.MenuItem()
+    box = Gtk.Box(spacing=8)
+    if icon is not None:
+        box.pack_start(icon, False, False, 0)
+    lab = Gtk.Label(xalign=0)
+    lab.set_max_width_chars(48)
+    lab.set_ellipsize(3)
+    if bold:
+        lab.set_markup(f"<b>{GLib.markup_escape_text(label)}</b>")
+    else:
+        lab.set_text_with_mnemonic(label) if "_" in label else lab.set_text(label)
+    box.pack_start(lab, True, True, 0)
+    item.add(box)
+    item.set_sensitive(sensitive)
+    if callback is not None:
+        item.connect("activate", lambda _i: callback())
+    return item
+
+
+# ------------------------------------------------------------- app icons --
+
+class Apps:
+    """app_id -> (name, GIcon), from the installed .desktop files."""
+
+    def __init__(self):
+        self.cache = {}
+        self.all = None
+        Gio.AppInfoMonitor.get().connect("changed", self.reset)
+
+    def reset(self, *_a):
+        self.cache.clear()
+        self.all = None
+
+    def find(self, app_id):
+        if not app_id:
+            return None
+        for cand in (app_id, app_id.lower()):
+            try:
+                info = Gio.DesktopAppInfo.new(cand + ".desktop")
+            except TypeError:
+                info = None
+            if info is not None:
+                return info
+        low = app_id.lower()
+        if self.all is None:
+            self.all = [a for a in Gio.AppInfo.get_all() if isinstance(a, Gio.DesktopAppInfo)]
+        for a in self.all:
+            wm = (a.get_startup_wm_class() or "").lower()
+            did = (a.get_id() or "")[:-len(".desktop")].lower()
+            exe = os.path.basename((a.get_executable() or "")).lower()
+            if low in (wm, did, exe) or did.endswith("." + low):
+                return a
+        return None
+
+    def lookup(self, app_id):
+        if app_id in self.cache:
+            return self.cache[app_id]
+        info = self.find(app_id)
+        name = info.get_name() if info else ""
+        gicon = info.get_icon() if info else None
+        if gicon is None:
+            theme = Gtk.IconTheme.get_default()
+            guess = (app_id or "").lower()
+            gicon = Gio.ThemedIcon.new(guess if guess and theme.has_icon(guess)
+                                       else "application-x-executable")
+        out = (name or app_id or "Program", gicon)
+        self.cache[app_id] = out
+        return out
+
+    def image(self, app_id, size=ICON):
+        img = Gtk.Image.new_from_gicon(self.lookup(app_id)[1], Gtk.IconSize.MENU)
+        img.set_pixel_size(size)
+        return img
+
+
+APPS = None
+
+
+# ------------------------------------------------- windows (Wayland side) --
+
+class Window:
+    def __init__(self, handle, seq):
+        self.handle = handle
+        self.seq = seq
+        self.title = ""
+        self.app_id = ""
+        self.outputs = set()
+        self.states = set()
+
+    @property
+    def active(self):
+        return 2 in self.states
+
+    @property
+    def minimized(self):
+        return 1 in self.states
+
+    @property
+    def maximized(self):
+        return 0 in self.states
+
+    @property
+    def label(self):
+        return self.title or APPS.lookup(self.app_id)[0]
+
+
+class Toplevels:
+    """The open windows, from labwc's wlr-foreign-toplevel-management."""
+
+    def __init__(self, on_change):
+        self.on_change = on_change
+        self.windows = {}          # handle -> Window
+        self.outputs = {}          # WlOutput proxy -> {"x":, "y":, "name":}
+        self.globals = {}          # registry name -> proxy
+        self.seat = None
+        self.manager = None
+        self.xdg_outputs = None
+        self.xdg = {}              # WlOutput -> its xdg_output (kept alive)
+        self.seq = 0
+        self.pending = False
+        global DISPLAY
+        try:
+            patch_pywayland()
+        except (ImportError, AttributeError) as err:
+            cant_run(f"unsupported pywayland version: {err}")
+        try:
+            self.display = Display()
+            self.display.connect()
+        except Exception as err:  # noqa: BLE001 - no Wayland display
+            cant_run(f"can't connect to Wayland: {err}")
+        DISPLAY = self.display
+        registry = self.display.get_registry()
+        registry.dispatcher["global"] = self.on_global
+        registry.dispatcher["global_remove"] = self.on_global_remove
+        self.display.roundtrip()
+        if self.manager is None:
+            cant_run("the compositor has no window list (wlr-foreign-toplevel-management)")
+        self.display.roundtrip()
+        GLib.io_add_watch(self.display.get_fd(), GLib.PRIORITY_DEFAULT,
+                          GLib.IOCondition.IN | GLib.IOCondition.ERR | GLib.IOCondition.HUP, self.on_io)
+
+    # registry
+    def on_global(self, registry, name, interface, version):
+        if interface == "zwlr_foreign_toplevel_manager_v1":
+            self.manager = registry.bind(name, ZwlrForeignToplevelManagerV1, min(version, 3))
+            self.manager.dispatcher["toplevel"] = self.on_toplevel
+        elif interface == "wl_seat" and self.seat is None:
+            self.seat = registry.bind(name, WlSeat, min(version, 7))
+        elif interface == "zxdg_output_manager_v1":
+            self.xdg_outputs = registry.bind(name, ZxdgOutputManagerV1, min(version, 3))
+            for out in self.outputs:
+                self.watch_position(out)
+        elif interface == "wl_output":
+            out = registry.bind(name, WlOutput, min(version, 4))
+            self.outputs[out] = {"x": None, "y": None, "name": ""}
+            self.globals[name] = out
+            out.dispatcher["name"] = lambda o, n: self.outputs.get(o, {}).update(name=n)
+            if self.xdg_outputs is not None:
+                self.watch_position(out)
+
+    def watch_position(self, out):
+        """Where the monitor sits in the desktop (the logical position GTK
+        uses too), to know which taskbar a window belongs on."""
+        if out in self.xdg:
+            return
+        xo = self.xdg_outputs.get_xdg_output(out)
+        self.xdg[out] = xo
+
+        def position(_xo, x, y):
+            if out in self.outputs:
+                self.outputs[out].update(x=x, y=y)
+                self.changed()
+        xo.dispatcher["logical_position"] = position
+
+    def on_global_remove(self, _registry, name):
+        out = self.globals.pop(name, None)
+        if out is not None:
+            self.outputs.pop(out, None)
+            xo = self.xdg.pop(out, None)
+            if xo is not None:
+                try:
+                    xo.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
+            for w in self.windows.values():
+                w.outputs.discard(out)
+            self.changed()
+
+    # windows
+    def on_toplevel(self, _manager, handle):
+        self.seq += 1
+        w = Window(handle, self.seq)
+        self.windows[handle] = w
+        handle.dispatcher["title"] = lambda h, t: setattr(w, "title", t)
+        handle.dispatcher["app_id"] = lambda h, a: setattr(w, "app_id", a)
+        handle.dispatcher["output_enter"] = lambda h, o: w.outputs.add(o)
+        handle.dispatcher["output_leave"] = lambda h, o: w.outputs.discard(o)
+
+        def state(_h, states):
+            if isinstance(states, (bytes, bytearray)):
+                states = struct.unpack(f"{len(states) // 4}I", bytes(states[:len(states) // 4 * 4]))
+            w.states = set(states)
+        handle.dispatcher["state"] = state
+        handle.dispatcher["done"] = lambda h: self.changed()
+        handle.dispatcher["parent"] = lambda h, p: None
+
+        def closed(h):
+            self.windows.pop(h, None)
+            try:
+                h.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+            self.changed()
+        handle.dispatcher["closed"] = closed
+
+    def on_io(self, _fd, cond):
+        if cond & (GLib.IOCondition.ERR | GLib.IOCondition.HUP):
+            print("firox-panel: lost the Wayland connection", file=sys.stderr)
+            Gtk.main_quit()
+            return False
+        try:
+            self.display.dispatch(block=True)
+            self.display.flush()
+        except Exception as err:  # noqa: BLE001
+            print(f"firox-panel: Wayland error: {err}", file=sys.stderr)
+            Gtk.main_quit()
+            return False
+        return True
+
+    def changed(self):
+        if not self.pending:
+            self.pending = True
+            GLib.idle_add(self._emit)
+
+    def _emit(self):
+        self.pending = False
+        self.on_change()
+        return False
+
+    def ordered(self):
+        return sorted(self.windows.values(), key=lambda w: w.seq)
+
+    def output_at(self, x, y):
+        return [o for o, info in self.outputs.items() if (info["x"], info["y"]) == (x, y)]
+
+    # actions
+    def _do(self, fn):
+        try:
+            fn()
+            self.display.flush()
+        except Exception as err:  # noqa: BLE001 - the window went away meanwhile
+            print(f"firox-panel: {err}", file=sys.stderr)
+
+    def activate(self, w):
+        def go():
+            if w.minimized:
+                w.handle.unset_minimized()
+            if self.seat is not None:
+                w.handle.activate(self.seat)
+        self._do(go)
+
+    def minimize(self, w):
+        self._do(w.handle.set_minimized)
+
+    def restore(self, w):
+        def go():
+            if w.minimized:
+                w.handle.unset_minimized()
+            if w.maximized:
+                w.handle.unset_maximized()
+            if self.seat is not None:
+                w.handle.activate(self.seat)
+        self._do(go)
+
+    def maximize(self, w):
+        def go():
+            if w.minimized:
+                w.handle.unset_minimized()
+            w.handle.set_maximized()
+            if self.seat is not None:
+                w.handle.activate(self.seat)
+        self._do(go)
+
+    def close(self, w):
+        self._do(w.handle.close)
+
+
+# ------------------------------------------------------ window buttons --
+
+class TaskButton(Gtk.Button):
+    """One window, or a group of an app's windows."""
+
+    def __init__(self, panel, key):
+        super().__init__()
+        self.panel = panel
+        self.key = key
+        self.windows = []
+        self.set_relief(Gtk.ReliefStyle.NONE)
+        self.set_focus_on_click(False)
+        self.add_events(Gdk.EventMask.SCROLL_MASK)
+        box = Gtk.Box(spacing=5)
+        self.icon = Gtk.Image()
+        box.pack_start(self.icon, False, False, 0)
+        self.count = Gtk.Label()
+        self.count.get_style_context().add_class("count")
+        box.pack_start(self.count, False, False, 0)
+        self.label = Gtk.Label(xalign=0)
+        self.label.set_ellipsize(3)            # END
+        # The taskbar sets every button's width (Taskbar.fit); the title
+        # just fills it
+        self.label.set_width_chars(1)
+        self.label.set_max_width_chars(1)
+        box.pack_start(self.label, True, True, 0)
+        self.arrow = Gtk.Label(label="▴")  # ▴
+        self.arrow.get_style_context().add_class("arrow")
+        box.pack_end(self.arrow, False, False, 0)
+        self.add(box)
+        self.show_all()
+        self.connect("clicked", self.on_click)
+        self.connect("button-press-event", self.on_press)
+        self.app_id = None
+
+    @property
+    def group(self):
+        return len(self.windows) > 1
+
+    def update(self, windows):
+        self.windows = windows
+        first = windows[0]
+        if first.app_id != self.app_id or not self.icon.get_gicon():
+            self.app_id = first.app_id
+            self.icon.set_from_gicon(APPS.lookup(first.app_id)[1], Gtk.IconSize.MENU)
+            self.icon.set_pixel_size(ICON)
+        ctx = self.get_style_context()
+        if self.group:
+            name = APPS.lookup(first.app_id)[0]
+            self.count.set_text(str(len(windows)))
+            self.label.set_text(name)
+            self.set_tooltip_text(f"{name}: {len(windows)} windows\nClick to choose one")
+            ctx.add_class("group")
+        else:
+            self.count.set_text("")
+            self.label.set_text(first.label)
+            self.set_tooltip_text(first.label)
+            ctx.remove_class("group")
+        self.count.set_visible(self.group)
+        self.arrow.set_visible(self.group)
+        active = any(w.active and not w.minimized for w in windows)
+        for cls, on in (("active", active), ("minimized", all(w.minimized for w in windows))):
+            (ctx.add_class if on else ctx.remove_class)(cls)
+
+    # clicks
+    def on_click(self, _b):
+        tl = self.panel.toplevels
+        if self.group:
+            menu = Gtk.Menu()
+            menu.get_style_context().add_class("firox-taskbar-menu")
+            for w in self.windows:
+                menu.append(menu_item(w.label, lambda w=w: tl.activate(w),
+                                      icon=APPS.image(w.app_id), bold=w.active and not w.minimized))
+            self.panel.keep(menu)
+            popup_menu(menu, self, Gtk.get_current_event())
+            return
+        w = self.windows[0]
+        if w.active and not w.minimized:
+            tl.minimize(w)
+        else:
+            tl.activate(w)
+
+    def on_press(self, _b, event):
+        if event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        tl = self.panel.toplevels
+        if event.button == 2:                     # middle: close
+            if not self.group:
+                tl.close(self.windows[0])
+            return True
+        if event.button != 3:
+            return False
+        menu = Gtk.Menu()
+        if self.group:
+            ws = list(self.windows)
+            menu.append(menu_item("_Restore all", lambda: [tl.activate(w) for w in ws if w.minimized]
+                                  or None, sensitive=any(w.minimized for w in ws)))
+            menu.append(menu_item("Mi_nimize group", lambda: [tl.minimize(w) for w in ws] and None,
+                                  sensitive=not all(w.minimized for w in ws)))
+            menu.append(Gtk.SeparatorMenuItem())
+            menu.append(menu_item(f"_Close group ({len(ws)} windows)",
+                                  lambda: [tl.close(w) for w in ws] and None))
+        else:
+            w = self.windows[0]
+            menu.append(menu_item("_Restore", lambda: tl.restore(w), sensitive=w.minimized or w.maximized))
+            menu.append(menu_item("Mi_nimize", lambda: tl.minimize(w), sensitive=not w.minimized))
+            menu.append(menu_item("Ma_ximize", lambda: tl.maximize(w), sensitive=not w.maximized))
+            menu.append(Gtk.SeparatorMenuItem())
+            menu.append(menu_item("_Close", lambda: tl.close(w)))
+        self.panel.keep(menu)
+        popup_menu(menu, self, event)
+        return True
+
+
+class Taskbar(Gtk.Box):
+    WIDEST, NARROWEST = 170, 44     # button width, like XP: equal, shrinking to fit
+
+    def __init__(self, panel, bar):
+        super().__init__(spacing=0)
+        self.set_name("taskbar")
+        self.panel = panel
+        self.bar = bar
+        self.buttons = {}
+        self.width = 0
+        self.per = 0
+        self.connect("size-allocate", self.on_allocate)
+
+    def on_allocate(self, _w, alloc):
+        if alloc.width != self.width:
+            self.width = alloc.width
+            GLib.idle_add(self.fit)
+
+    def fit(self):
+        n = len(self.buttons)
+        if not n:
+            return False
+        # margins between buttons come from the theme (about 2px each)
+        per = max(self.NARROWEST, min(self.WIDEST, self.width // n - 2))
+        if per != self.per or any(b.get_size_request()[0] != per for b in self.buttons.values()):
+            self.per = per
+            for b in self.buttons.values():
+                b.set_size_request(per, -1)
+        return False
+
+    def refresh(self, windows, grouping):
+        groups = {}      # key -> [windows], in the order the first window opened
+        for w in windows:
+            key = ("g", w.app_id) if grouping and w.app_id else ("w", w.seq)
+            groups.setdefault(key, []).append(w)
+        # A "group" of one is shown as that window's own button
+        wanted = []
+        for key, ws in groups.items():
+            wanted.append((key if len(ws) > 1 else ("w", ws[0].seq), ws))
+        keys = {k for k, _ws in wanted}
+        for key in list(self.buttons):
+            if key not in keys:
+                self.buttons.pop(key).destroy()
+        for pos, (key, ws) in enumerate(wanted):
+            btn = self.buttons.get(key)
+            if btn is None:
+                btn = TaskButton(self.panel, key)
+                self.buttons[key] = btn
+                self.pack_start(btn, False, False, 0)
+            btn.update(ws)
+            self.reorder_child(btn, pos)
+        self.fit()
+        if os.environ.get("FIROX_PANEL_DEBUG"):
+            geo = self.bar.monitor.get_geometry()
+            print(f"bar@{geo.x},{geo.y}: " + ", ".join(
+                f"{w.title}[{','.join(str(self.panel.toplevels.outputs.get(o)) for o in w.outputs)}]"
+                for w in windows), file=sys.stderr)
+
+
+# ------------------------------------------------- notification area: apps --
+
+WATCHER_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierWatcher">
+    <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
+    <method name="RegisterStatusNotifierHost"><arg type="s" direction="in"/></method>
+    <property name="RegisteredStatusNotifierItems" type="as" access="read"/>
+    <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
+    <property name="ProtocolVersion" type="i" access="read"/>
+    <signal name="StatusNotifierItemRegistered"><arg type="s"/></signal>
+    <signal name="StatusNotifierItemUnregistered"><arg type="s"/></signal>
+    <signal name="StatusNotifierHostRegistered"/>
+    <signal name="StatusNotifierHostUnregistered"/>
+  </interface>
+</node>
+"""
+SNI = "org.kde.StatusNotifierItem"
+WATCHER = "org.kde.StatusNotifierWatcher"
+
+
+class TrayItem:
+    def __init__(self, tray, bus, path):
+        self.tray = tray
+        self.bus = bus
+        self.path = path
+        self.props = {}
+        self.refetching = False
+        self.sub = tray.conn.signal_subscribe(bus, SNI, None, path, None, Gio.DBusSignalFlags.NONE,
+                                              lambda *_a: self.refetch())
+        self.refetch()
+
+    @property
+    def key(self):
+        return self.bus + self.path
+
+    def refetch(self):
+        if self.refetching:
+            return
+        self.refetching = True
+        GLib.timeout_add(50, self._fetch)
+
+    def _fetch(self):
+        self.tray.conn.call(self.bus, self.path, "org.freedesktop.DBus.Properties", "GetAll",
+                            GLib.Variant("(s)", (SNI,)), GLib.VariantType("(a{sv})"),
+                            Gio.DBusCallFlags.NONE, 3000, None, self._got)
+        return False
+
+    def _got(self, conn, res):
+        self.refetching = False
+        try:
+            (self.props,) = conn.call_finish(res).unpack()
+        except GLib.Error:
+            return
+        self.tray.item_changed(self)
+
+    def drop(self):
+        self.tray.conn.signal_unsubscribe(self.sub)
+
+    # what to show
+    def pixbuf(self, size):
+        p = self.props
+        attention = p.get("Status") == "NeedsAttention"
+        name = (attention and p.get("AttentionIconName")) or p.get("IconName") or ""
+        if name:
+            pb = self._named(name, p.get("IconThemePath") or "", size)
+            if pb is not None:
+                return pb
+        pixmaps = (attention and p.get("AttentionIconPixmap")) or p.get("IconPixmap") or []
+        return self._pixmap(pixmaps, size)
+
+    @staticmethod
+    def _named(name, theme_path, size):
+        try:
+            if name.startswith("/") and os.path.exists(name):
+                return GdkPixbuf.Pixbuf.new_from_file_at_size(name, size, size)
+            if theme_path:
+                for ext in ("svg", "png", "xpm"):
+                    hits = glob.glob(os.path.join(theme_path, "**", f"{name}.{ext}"), recursive=True)
+                    if hits:
+                        return GdkPixbuf.Pixbuf.new_from_file_at_size(sorted(hits)[-1], size, size)
+            theme = Gtk.IconTheme.get_default()
+            if theme.has_icon(name):
+                return theme.load_icon(name, size, Gtk.IconLookupFlags.FORCE_SIZE)
+        except GLib.Error:
+            pass
+        return None
+
+    @staticmethod
+    def _pixmap(pixmaps, size):
+        best = None
+        for w, h, data in pixmaps:
+            if w <= 0 or h <= 0 or len(data) < w * h * 4:
+                continue
+            if best is None or (best[0] < size and w > best[0]) or (size <= w < best[0]):
+                best = (w, h, data)
+        if best is None:
+            return None
+        w, h, data = best
+        argb = bytes(data[:w * h * 4])
+        rgba = bytearray(len(argb))
+        rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = argb[1::4], argb[2::4], argb[3::4], argb[0::4]
+        pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(rgba)), GdkPixbuf.Colorspace.RGB,
+                                             True, 8, w, h, w * 4)
+        return pb if (w, h) == (size, size) else pb.scale_simple(size, size, GdkPixbuf.InterpType.BILINEAR)
+
+    def tooltip(self):
+        tip = self.props.get("ToolTip")
+        if tip and len(tip) >= 4 and (tip[2] or tip[3]):
+            text = "\n".join(x for x in (tip[2], tip[3]) if x)
+        else:
+            text = self.props.get("Title") or ""
+        return re.sub(r"<[^>]*>", "", text)
+
+    def hidden(self):
+        return self.props.get("Status") == "Passive"
+
+    # clicks
+    def call(self, method, args, on_error=None):
+        def done(conn, res):
+            try:
+                conn.call_finish(res)
+            except GLib.Error:
+                if on_error:
+                    on_error()
+        self.tray.conn.call(self.bus, self.path, SNI, method, args, None,
+                            Gio.DBusCallFlags.NONE, 3000, None, done)
+
+    def show_menu(self, widget, event):
+        menu_path = self.props.get("Menu")
+        if not menu_path or menu_path == "/":
+            self.call("ContextMenu", GLib.Variant("(ii)", (int(event.x_root), int(event.y_root))))
+            return
+        DBusMenu(self.tray, self.bus, menu_path).open(widget, event)
+
+
+class DBusMenu:
+    """A com.canonical.dbusmenu menu (what tray apps use) as a Gtk.Menu."""
+
+    IFACE = "com.canonical.dbusmenu"
+
+    def __init__(self, tray, bus, path):
+        self.tray = tray
+        self.bus = bus
+        self.path = path
+
+    def open(self, widget, event):
+        conn = self.tray.conn
+        event = event.copy()       # the menu opens after the reply; GTK frees the original
+        conn.call(self.bus, self.path, self.IFACE, "AboutToShow", GLib.Variant("(i)", (0,)),
+                  None, Gio.DBusCallFlags.NONE, 1000, None, None)
+
+        def got(c, res):
+            try:
+                _rev, layout = c.call_finish(res).unpack()
+            except GLib.Error as err:
+                print(f"firox-panel: tray menu: {err.message}", file=sys.stderr)
+                return
+            menu = self.build(layout)
+            self.tray.panel.keep(menu)
+            popup_menu(menu, widget, event)
+        conn.call(self.bus, self.path, self.IFACE, "GetLayout",
+                  GLib.Variant("(iias)", (0, -1, [])), GLib.VariantType("(u(ia{sv}av))"),
+                  Gio.DBusCallFlags.NONE, 3000, None, got)
+
+    def build(self, layout):
+        menu = Gtk.Menu()
+        _id, _props, children = layout
+        group = None
+        for child in children:
+            cid, props, sub = child
+            if not props.get("visible", True):
+                continue
+            if props.get("type") == "separator":
+                menu.append(Gtk.SeparatorMenuItem())
+                group = None
+                continue
+            label = props.get("label", "")
+            toggle = props.get("toggle-type", "")
+            if toggle in ("checkmark", "radio"):
+                item = Gtk.CheckMenuItem.new_with_mnemonic(label)
+                item.set_draw_as_radio(toggle == "radio")
+                item.set_active(props.get("toggle-state", 0) == 1)
+            else:
+                item = Gtk.MenuItem.new_with_mnemonic(label)
+                group = None
+            item.set_sensitive(props.get("enabled", True))
+            if sub or props.get("children-display") == "submenu":
+                item.set_submenu(self.build(child))
+            else:
+                item.connect("activate", lambda _i, cid=cid: self.clicked(cid))
+            menu.append(item)
+        return menu
+
+    def clicked(self, cid):
+        self.tray.conn.call(self.bus, self.path, self.IFACE, "Event",
+                            GLib.Variant("(isvu)", (cid, "clicked", GLib.Variant("i", 0), int(time.time()))),
+                            None, Gio.DBusCallFlags.NONE, 3000, None, None)
+
+
+class Tray:
+    """StatusNotifierWatcher + host: the icons apps put in the notification
+    area. If something else already is the watcher, use that one."""
+
+    def __init__(self, panel):
+        self.panel = panel
+        self.items = {}            # key -> TrayItem
+        self.watches = {}          # bus -> watch id
+        self.views = []
+        self.conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.node = Gio.DBusNodeInfo.new_for_xml(WATCHER_XML)
+        self.reg_id = None
+        self.remote_subs = []
+        Gio.bus_own_name_on_connection(self.conn, f"org.kde.StatusNotifierHost-{os.getpid()}",
+                                       Gio.BusNameOwnerFlags.NONE, None, None)
+        Gio.bus_own_name_on_connection(self.conn, WATCHER, Gio.BusNameOwnerFlags.NONE,
+                                       self.on_acquired, self.on_lost)
+
+    # we are the watcher
+    def on_acquired(self, conn, _name):
+        for sub in self.remote_subs:
+            conn.signal_unsubscribe(sub)
+        self.remote_subs = []
+        if self.reg_id is None:
+            self.reg_id = conn.register_object("/StatusNotifierWatcher", self.node.interfaces[0],
+                                               self.on_method, self.on_get, None)
+        conn.emit_signal(None, "/StatusNotifierWatcher", WATCHER, "StatusNotifierHostRegistered", None)
+
+    def on_method(self, _conn, sender, _path, _iface, method, params, invocation):
+        if method == "RegisterStatusNotifierItem":
+            (service,) = params.unpack()
+            if service.startswith("/"):
+                bus, path = sender, service
+            else:
+                bus, path = service, "/StatusNotifierItem"
+            self.add(bus, path)
+            invocation.return_value(None)
+        elif method == "RegisterStatusNotifierHost":
+            invocation.return_value(None)
+        else:
+            invocation.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method)
+
+    def on_get(self, _conn, _sender, _path, _iface, prop):
+        if prop == "RegisteredStatusNotifierItems":
+            return GLib.Variant("as", list(self.items))
+        if prop == "IsStatusNotifierHostRegistered":
+            return GLib.Variant("b", True)
+        if prop == "ProtocolVersion":
+            return GLib.Variant("i", 0)
+        return None
+
+    # someone else is the watcher: be a host of theirs
+    def on_lost(self, conn, _name):
+        if self.reg_id is not None or self.remote_subs:
+            return
+        self.remote_subs = [
+            conn.signal_subscribe(None, WATCHER, "StatusNotifierItemRegistered", "/StatusNotifierWatcher",
+                                  None, Gio.DBusSignalFlags.NONE,
+                                  lambda c, s, p, i, n, params: self.add_id(params.unpack()[0])),
+        ]
+        conn.call(WATCHER, "/StatusNotifierWatcher", WATCHER, "RegisterStatusNotifierHost",
+                  GLib.Variant("(s)", (f"org.kde.StatusNotifierHost-{os.getpid()}",)),
+                  None, Gio.DBusCallFlags.NONE, 3000, None, None)
+
+        def got(c, res):
+            try:
+                (val,) = c.call_finish(res).unpack()
+            except GLib.Error:
+                return
+            for ident in val:
+                self.add_id(ident)
+        conn.call(WATCHER, "/StatusNotifierWatcher", "org.freedesktop.DBus.Properties", "Get",
+                  GLib.Variant("(ss)", (WATCHER, "RegisteredStatusNotifierItems")),
+                  GLib.VariantType("(v)"), Gio.DBusCallFlags.NONE, 3000, None, got)
+
+    def add_id(self, ident):
+        i = ident.find("/")
+        if i <= 0:
+            self.add(ident, "/StatusNotifierItem")
+        else:
+            self.add(ident[:i], ident[i:])
+
+    # items
+    def add(self, bus, path):
+        key = bus + path
+        if key in self.items:
+            return
+        item = TrayItem(self, bus, path)
+        self.items[key] = item
+        if bus not in self.watches:
+            self.watches[bus] = Gio.bus_watch_name_on_connection(
+                self.conn, bus, Gio.BusNameWatcherFlags.NONE, None, self.on_vanished)
+        if self.reg_id is not None:
+            self.conn.emit_signal(None, "/StatusNotifierWatcher", WATCHER, "StatusNotifierItemRegistered",
+                                  GLib.Variant("(s)", (key,)))
+
+    def on_vanished(self, _conn, bus):
+        watch = self.watches.pop(bus, None)
+        if watch is not None:
+            Gio.bus_unwatch_name(watch)
+        for key in [k for k, it in self.items.items() if it.bus == bus]:
+            self.items.pop(key).drop()
+            if self.reg_id is not None:
+                self.conn.emit_signal(None, "/StatusNotifierWatcher", WATCHER,
+                                      "StatusNotifierItemUnregistered", GLib.Variant("(s)", (key,)))
+        for v in self.views:
+            v.refresh()
+
+    def item_changed(self, _item):
+        for v in self.views:
+            v.refresh()
+
+
+class TrayView(Gtk.Box):
+    def __init__(self, tray):
+        super().__init__(spacing=2)
+        self.set_name("tray")
+        self.set_no_show_all(True)
+        self.tray = tray
+        self.icons = {}
+        tray.views.append(self)
+        self.connect("destroy", lambda _w: tray.views.remove(self))
+        self.refresh()
+
+    def refresh(self):
+        items = self.tray.items
+        for key in list(self.icons):
+            if key not in items:
+                self.icons.pop(key).destroy()
+        for key, item in items.items():
+            btn = self.icons.get(key)
+            if btn is None:
+                btn = Gtk.Button()
+                btn.set_no_show_all(True)
+                btn.set_relief(Gtk.ReliefStyle.NONE)
+                btn.set_focus_on_click(False)
+                btn.add(Gtk.Image())
+                btn.add_events(Gdk.EventMask.SCROLL_MASK)
+                btn.connect("button-press-event", self.on_press, key)
+                btn.connect("scroll-event", self.on_scroll, key)
+                self.icons[key] = btn
+                self.pack_start(btn, False, False, 0)
+            pb = item.pixbuf(ICON * btn.get_scale_factor())
+            img = btn.get_child()
+            if pb is not None:
+                if btn.get_scale_factor() > 1:
+                    surf = Gdk.cairo_surface_create_from_pixbuf(pb, btn.get_scale_factor(), None)
+                    img.set_from_surface(surf)
+                else:
+                    img.set_from_pixbuf(pb)
+            else:
+                img.set_from_icon_name("image-missing", Gtk.IconSize.MENU)
+            btn.set_tooltip_text(item.tooltip() or None)
+            btn.set_visible(not item.hidden())
+            img.show()
+        self.set_visible(any(not it.hidden() for it in items.values()))
+
+    def on_press(self, btn, event, key):
+        item = self.tray.items.get(key)
+        if item is None or event.type != Gdk.EventType.BUTTON_PRESS:
+            return True
+        pos = GLib.Variant("(ii)", (int(event.x_root), int(event.y_root)))
+        if event.button == 1:
+            if item.props.get("ItemIsMenu"):
+                item.show_menu(btn, event)
+            else:
+                ev = event.copy()
+                item.call("Activate", pos, on_error=lambda: item.show_menu(btn, ev))
+        elif event.button == 2:
+            item.call("SecondaryActivate", pos)
+        elif event.button == 3:
+            item.show_menu(btn, event)
+        return True
+
+    def on_scroll(self, _btn, event, key):
+        item = self.tray.items.get(key)
+        if item is None:
+            return True
+        delta = {Gdk.ScrollDirection.UP: -1, Gdk.ScrollDirection.DOWN: 1}.get(event.direction)
+        if delta is not None:
+            item.call("Scroll", GLib.Variant("(is)", (delta * 120, "vertical")))
+        return True
+
+
+# ---------------------------------------- notification area: indicators --
+
+class Indicator:
+    """A glyph in the notification area, shown on every bar."""
+
+    def __init__(self, name):
+        self.name = name
+        self.text = ""
+        self.tip = ""
+        self.classes = set()
+        self.visible = True
+        self.views = []
+
+    def make(self):
+        btn = Gtk.Button()
+        btn.set_name(self.name)
+        btn.set_relief(Gtk.ReliefStyle.NONE)
+        btn.set_focus_on_click(False)
+        btn.add(Gtk.Label())
+        btn.add_events(Gdk.EventMask.SCROLL_MASK)
+        btn.connect("button-press-event", lambda b, e: self.on_press(b, e) if e.type == Gdk.EventType.BUTTON_PRESS else True)
+        btn.connect("scroll-event", lambda b, e: self.on_scroll(e) or True)
+        self.views.append(btn)
+        btn.connect("destroy", lambda b: self.views.remove(b))
+        self.paint(btn)
+        return btn
+
+    def set(self, text=None, tip=None, classes=None, visible=None):
+        if text is not None:
+            self.text = text
+        if tip is not None:
+            self.tip = tip
+        if classes is not None:
+            self.classes = set(classes)
+        if visible is not None:
+            self.visible = visible
+        for b in self.views:
+            self.paint(b)
+
+    def paint(self, btn):
+        btn.get_child().set_text(self.text)
+        btn.set_tooltip_text(self.tip or None)
+        ctx = btn.get_style_context()
+        for cls in getattr(btn, "firox_classes", set()) - self.classes:
+            ctx.remove_class(cls)
+        for cls in self.classes:
+            ctx.add_class(cls)
+        btn.firox_classes = set(self.classes)
+        btn.set_no_show_all(True)
+        btn.get_child().show()
+        btn.set_visible(self.visible)
+
+    def on_press(self, _btn, event):
+        cmd = {1: self.left, 2: self.middle, 3: self.right}.get(event.button)
+        if cmd:
+            cmd()
+        return True
+
+    def left(self):
+        pass
+
+    middle = right = left
+
+    def on_scroll(self, _event):
+        pass
+
+
+class Awake(Indicator):
+    """Keep the screen on (what waybar called the idle inhibitor)."""
+
+    def __init__(self):
+        super().__init__("idle_inhibitor")
+        self.update()
+
+    def update(self):
+        on = os.path.exists(AWAKE)
+        self.set(FA_EYE if on else FA_EYE_SLASH,
+                 "Keeping the screen on: the screen saver, screen off and sleep timers are paused\n"
+                 "Click to turn this off" if on else
+                 "Click to keep the screen on (pause the screen saver and sleep timers)",
+                 ["activated" if on else "deactivated"])
+
+    def left(self):
+        subprocess.run(["firox-power", "awake", "toggle"], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=10)
+        self.update()
+
+
+class Volume(Indicator):
+    def __init__(self):
+        super().__init__("pulseaudio")
+        self.pending = False
+        self.update()
+        self.watch()
+
+    def watch(self):
+        """pactl subscribe tells us about changes made anywhere."""
+        try:
+            proc = Gio.Subprocess.new(["pactl", "subscribe"], Gio.SubprocessFlags.STDOUT_PIPE
+                                      | Gio.SubprocessFlags.STDERR_SILENCE)
+        except GLib.Error:
+            GLib.timeout_add_seconds(3, lambda: self.update() or True)
+            return
+        stream = Gio.DataInputStream.new(proc.get_stdout_pipe())
+
+        def line(s, res):
+            try:
+                text, _len = s.read_line_finish_utf8(res)
+            except GLib.Error:
+                text = None
+            if text is None:                 # pactl ended (sound server restarted)
+                GLib.timeout_add_seconds(3, lambda: self.watch() or False)
+                return
+            if "sink" in text or "server" in text:
+                self.soon()
+            s.read_line_async(GLib.PRIORITY_DEFAULT, None, line)
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, None, line)
+
+    def soon(self):
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(100, self.update)
+
+    def update(self):
+        self.pending = False
+        try:
+            out = subprocess.run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], capture_output=True,
+                                 text=True, timeout=3).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        m = re.search(r"Volume:\s*([\d.]+)", out)
+        if not m:
+            self.set(FA_MUTED, "No sound device\nClick for the volume control", ["muted"])
+            return False
+        pct = round(float(m.group(1)) * 100)
+        muted = "MUTED" in out
+        glyph = FA_MUTED if muted else FA_VOLUME[min(2, pct * 3 // 101)]
+        self.set(glyph, f"Volume: {pct}%{' (muted)' if muted else ''}\n"
+                        "Click for the volume control. Right-click to mute.",
+                 ["muted"] if muted else [])
+        return False
+
+    def left(self):
+        spawn(["firox-volume", "toggle"])
+
+    def right(self):
+        spawn(["firox-osd", "volume", "mute"])
+
+    def on_scroll(self, event):
+        step = {Gdk.ScrollDirection.UP: "5%+", Gdk.ScrollDirection.DOWN: "5%-"}.get(event.direction)
+        if step is None and event.direction == Gdk.ScrollDirection.SMOOTH:
+            ok, _dx, dy = event.get_scroll_deltas()
+            step = "5%-" if ok and dy > 0 else "5%+" if ok and dy < 0 else None
+        if step:
+            subprocess.run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", step], timeout=3)
+            self.update()
+
+
+class Battery(Indicator):
+    PS = os.environ.get("FIROX_POWER_SUPPLY", "/sys/class/power_supply")
+
+    def __init__(self):
+        super().__init__("battery")
+        self.update()
+        GLib.timeout_add_seconds(30, lambda: self.update() or True)
+
+    def update(self):
+        bats, mains = [], False
+        for d in glob.glob(os.path.join(self.PS, "*")):
+            kind = read(os.path.join(d, "type"))
+            if kind == "Battery" and read(os.path.join(d, "scope")) != "Device":
+                bats.append(d)
+            elif kind == "Mains" and read(os.path.join(d, "online")) == "1":
+                mains = True
+        if not bats:
+            self.set(visible=False)
+            return
+        caps = [int(read(os.path.join(d, "capacity")) or 0) for d in bats]
+        pct = sum(caps) // len(caps)
+        status = {read(os.path.join(d, "status")) for d in bats}
+        charging = "Charging" in status
+        plugged = mains or charging or status <= {"Full", "Not charging"}
+        left = self.time_left(bats, charging)
+        if charging:
+            tip = f"{pct}% charging" + (f" ({left} until full)" if left else "")
+        elif plugged:
+            tip = f"{pct}%, plugged in"
+        else:
+            tip = f"{pct}% remaining" + (f" ({left})" if left else "")
+        cls = ["critical"] if pct <= 10 and not plugged else ["warning"] if pct <= 20 and not plugged else []
+        glyph = FA_CHARGING if charging else FA_BATTERY[min(4, pct * 5 // 101)]
+        self.set(glyph, tip + "\nClick for Power Options", cls + (["charging"] if charging else []), True)
+
+    def time_left(self, bats, charging):
+        now = full = rate = 0
+        for d in bats:
+            n = read(os.path.join(d, "energy_now")) or read(os.path.join(d, "charge_now"))
+            f = read(os.path.join(d, "energy_full")) or read(os.path.join(d, "charge_full"))
+            r = read(os.path.join(d, "power_now")) or read(os.path.join(d, "current_now"))
+            try:
+                now, full, rate = now + int(n), full + int(f), rate + abs(int(r))
+            except ValueError:
+                return ""
+        if rate <= 0:
+            return ""
+        hours = (full - now) / rate if charging else now / rate
+        if hours <= 0 or hours > 48:
+            return ""
+        h, m = divmod(int(hours * 60), 60)
+        return f"{h} h {m:02d} min" if h else f"{m} min"
+
+    def left(self):
+        spawn(["firox-control-panel", "power"])
+
+
+class Updates(Indicator):
+    def __init__(self):
+        super().__init__("custom-updates")
+        self.set(visible=False)
+        GLib.timeout_add_seconds(5, lambda: self.update() and False)
+        GLib.timeout_add_seconds(900, lambda: self.update() or True)
+
+    def update(self):
+        try:
+            proc = Gio.Subprocess.new(["firox-updates", "status"], Gio.SubprocessFlags.STDOUT_PIPE
+                                      | Gio.SubprocessFlags.STDERR_SILENCE)
+        except GLib.Error:
+            return False
+
+        def done(p, res):
+            try:
+                _ok, out, _err = p.communicate_utf8_finish(res)
+                data = json.loads(out or "{}")
+            except (GLib.Error, ValueError):
+                return
+            text = data.get("text", "")
+            self.set(text, data.get("tooltip", ""), [data.get("class", "")], bool(text))
+        proc.communicate_utf8_async(None, None, done)
+        return False
+
+    def left(self):
+        spawn(["firox-updates", "restart"])
+
+    def right(self):
+        spawn(["firox-updates", "whatsnew"])
+
+
+class Bell(Indicator):
+    def __init__(self):
+        super().__init__("custom-notifications")
+        os.makedirs(STATE, exist_ok=True)
+        self.mon = Gio.File.new_for_path(STATE).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+        self.mon.connect("changed", lambda *_a: self.update())
+        self.update()
+
+    def update(self):
+        dnd = os.path.exists(os.path.join(STATE, "do-not-disturb"))
+        self.set(FA_BELL_OFF if dnd else FA_BELL,
+                 ("Do Not Disturb is on" if dnd else "Notifications")
+                 + "\nClick to open. Right-click for Do Not Disturb.",
+                 ["dnd"] if dnd else ["read"])
+
+    def left(self):
+        spawn(["firox-notifications", "toggle"])
+
+    def right(self):
+        spawn(["firox-notifications", "dnd", "toggle"])
+
+
+class Clock(Indicator):
+    def __init__(self):
+        super().__init__("clock")
+        self.tick()
+
+    def tick(self):
+        now = time.localtime()
+        self.set(time.strftime("%I:%M %p", now).lstrip("0"),
+                 time.strftime("%A, ", now) + time.strftime("%B ", now) + str(now.tm_mday)
+                 + time.strftime(", %Y", now) + "\nClick for the calendar")
+        GLib.timeout_add_seconds(60 - now.tm_sec, self.tick)
+        return False
+
+    def left(self):
+        spawn(["firox-calendar", "toggle"])
+
+    def right(self):
+        spawn(["firox-control-panel", "datetime"])
+
+
+# -------------------------------------------------------------------- bar --
+
+class Bar(Gtk.Window):
+    def __init__(self, panel, monitor):
+        super().__init__()
+        self.panel = panel
+        self.monitor = monitor
+        self.set_name("panel")
+        self.set_title("Taskbar")
+        self.set_decorated(False)
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_namespace(self, "firox-panel")
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+        GtkLayerShell.set_monitor(self, monitor)
+        for edge in (GtkLayerShell.Edge.BOTTOM, GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+            GtkLayerShell.set_anchor(self, edge, True)
+        GtkLayerShell.auto_exclusive_zone_enable(self)
+        self.set_size_request(-1, HEIGHT)
+
+        catcher = Gtk.EventBox()          # right-click on an empty part
+        catcher.connect("button-press-event", self.on_empty_press)
+        self.add(catcher)
+        row = Gtk.Box()
+        row.set_name("row")
+        catcher.add(row)
+
+        start = Gtk.Button(label="firox")
+        start.set_name("custom-start")
+        start.set_relief(Gtk.ReliefStyle.NONE)
+        start.set_focus_on_click(False)
+        start.set_tooltip_text("Click here to begin.")
+        start.connect("clicked", lambda _b: spawn(["firox-startmenu"]))
+        row.pack_start(start, False, False, 0)
+
+        ql = Gtk.Box(spacing=0)
+        ql.set_name("quick-launch")
+        for icon, cmd, tip in QUICK_LAUNCH:
+            b = Gtk.Button()
+            b.get_style_context().add_class("quick-launch")
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_focus_on_click(False)
+            b.set_tooltip_text(tip)
+            b.add(self.ql_icon(icon))
+            b.connect("clicked", lambda _b, c=cmd: spawn(c))
+            ql.pack_start(b, False, False, 0)
+        row.pack_start(ql, False, False, 0)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.set_name("custom-ql-sep")
+        row.pack_start(sep, False, False, 0)
+
+        self.taskbar = Taskbar(panel, self)
+        row.pack_start(self.taskbar, True, True, 0)
+
+        area = Gtk.EventBox()             # the notification area's background
+        area.set_name("notification-area")
+        tray_row = Gtk.Box()
+        area.add(tray_row)
+        tray_row.pack_start(TrayView(panel.tray), False, False, 0)
+        for ind in panel.indicators:
+            tray_row.pack_start(ind.make(), False, False, 0)
+        row.pack_end(area, False, False, 0)
+        self.show_all()
+        for ind in panel.indicators:
+            ind.set()
+
+    @staticmethod
+    def ql_icon(name):
+        for path in (f"/usr/share/icons/Papirus/24x24/apps/{name}.svg",):
+            if os.path.exists(path):
+                try:
+                    return Gtk.Image.new_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_size(path, 18, 18))
+                except GLib.Error:
+                    pass
+        img = Gtk.Image.new_from_icon_name(name, Gtk.IconSize.MENU)
+        img.set_pixel_size(18)
+        return img
+
+    def on_empty_press(self, _w, event):
+        if event.type != Gdk.EventType.BUTTON_PRESS or event.button != 3:
+            return False
+        p = self.panel
+        menu = Gtk.Menu()
+        group = Gtk.CheckMenuItem.new_with_mnemonic("_Group similar windows")
+        group.set_active(p.grouping)
+        group.connect("toggled", lambda i: p.set_grouping(i.get_active()))
+        menu.append(group)
+        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(menu_item("_Show the desktop", lambda: spawn(["firox-open", "show-desktop"])))
+        menu.append(menu_item("Task _Manager", lambda: spawn(["firox-open", "task-manager"])))
+        menu.append(menu_item("Se_ttings", lambda: spawn(["firox-control-panel"])))
+        p.keep(menu)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def matches(self, w, all_bars):
+        """Is window w on this bar's monitor? Windows we can't place go on
+        every bar."""
+        if len(all_bars) <= 1 or not w.outputs:
+            return True
+        geo = self.monitor.get_geometry()
+        mine = set(self.panel.toplevels.output_at(geo.x, geo.y))
+        if w.outputs & mine:
+            return True
+        # Not on any bar's monitor as far as we can tell: show it everywhere
+        for bar in all_bars:
+            g = bar.monitor.get_geometry()
+            if w.outputs & set(self.panel.toplevels.output_at(g.x, g.y)):
+                return False
+        return True
+
+
+# ------------------------------------------------------------------ panel --
+
+class Panel:
+    def __init__(self):
+        global APPS
+        APPS = Apps()
+        self.menus = []
+        self.bars = {}
+        self.grouping = load_settings().get("GROUP", "1") != "0"
+        if not GtkLayerShell.is_supported():
+            cant_run("the compositor doesn't support layer-shell")
+        self.toplevels = Toplevels(self.refresh)
+        self.tray = Tray(self)
+        self.indicators = [Awake(), Volume(), Battery(), Updates(), Bell(), Clock()]
+
+        self.provider = Gtk.CssProvider()
+        self.user_provider = Gtk.CssProvider()
+        screen = Gdk.Screen.get_default()
+        Gtk.StyleContext.add_provider_for_screen(screen, self.provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        Gtk.StyleContext.add_provider_for_screen(screen, self.user_provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        self.load_css()
+        os.makedirs(CONFIG, exist_ok=True)
+        self.theme_mon = Gio.File.new_for_path(CONFIG).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+        self.theme_mon.connect("changed", self.on_config_changed)
+
+        display = Gdk.Display.get_default()
+        display.connect("monitor-added", lambda _d, m: self.add_bar(m))
+        display.connect("monitor-removed", lambda _d, m: self.remove_bar(m))
+        for i in range(display.get_n_monitors()):
+            self.add_bar(display.get_monitor(i))
+        self.refresh()
+
+    def load_css(self):
+        try:
+            self.provider.load_from_path(theme_css())
+        except GLib.Error as err:
+            print(f"firox-panel: {err.message}", file=sys.stderr)
+        user = os.path.join(CONFIG, "panel.css")
+        try:
+            self.user_provider.load_from_data(open(user, "rb").read() if os.path.exists(user) else b"")
+        except (GLib.Error, OSError) as err:
+            print(f"firox-panel: {user}: {err}", file=sys.stderr)
+
+    def on_config_changed(self, _mon, f, _other, event):
+        if event not in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED,
+                         Gio.FileMonitorEvent.DELETED, Gio.FileMonitorEvent.MOVED_IN):
+            return
+        name = f.get_basename()
+        if name in ("theme", "panel.css"):
+            self.load_css()
+        elif name == "panel.conf":
+            grouping = load_settings().get("GROUP", "1") != "0"
+            if grouping != self.grouping:
+                self.grouping = grouping
+                self.refresh()
+
+    def add_bar(self, monitor):
+        if monitor not in self.bars:
+            self.bars[monitor] = Bar(self, monitor)
+            self.refresh()
+
+    def remove_bar(self, monitor):
+        bar = self.bars.pop(monitor, None)
+        if bar is not None:
+            bar.destroy()
+            self.refresh()
+
+    def refresh(self):
+        windows = self.toplevels.ordered()
+        bars = list(self.bars.values())
+        for bar in bars:
+            bar.taskbar.refresh([w for w in windows if bar.matches(w, bars)], self.grouping)
+
+    def set_grouping(self, on):
+        self.grouping = on
+        save_setting("GROUP", "1" if on else "0")
+        self.refresh()
+
+    def keep(self, menu):
+        """Hold a reference to an open menu until it closes."""
+        self.menus.append(menu)
+        menu.connect("deactivate", lambda m: GLib.idle_add(lambda: self._drop(m)))
+
+    def _drop(self, menu):
+        if menu in self.menus:
+            self.menus.remove(menu)
+        menu.destroy()
+        return False
+
+
+def main():
+    # One taskbar per session
+    me = os.getpid()
+    try:
+        out = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "firox-panel"],
+                             capture_output=True, text=True, timeout=5).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        out = []
+    for pid in out:
+        if int(pid) != me:
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
+    if Gdk.Display.get_default() is None:
+        cant_run("no display")
+    Panel()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

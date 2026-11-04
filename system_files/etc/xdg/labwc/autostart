@@ -9,11 +9,22 @@ CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
 xdg-user-dirs-update
 pcmanfm-qt --desktop --profile=firox >/dev/null 2>&1 &
 
-# Taskbar (a ~/.config/waybar/style.css of your own wins over the theme)
-if [ -e "$CFG/waybar/style.css" ]; then
-    waybar >/dev/null 2>&1 &
+# Taskbar: firox-panel (its log: ~/.local/state/firox/panel.log). If you
+# set up waybar yourself (~/.config/waybar), that runs instead; waybar is
+# also the fallback when firox-panel can't run here (it exits with 3).
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/firox"
+mkdir -p "$STATE"
+if [ -e "$CFG/waybar/config" ] || [ -e "$CFG/waybar/config.jsonc" ] || [ -e "$CFG/waybar/style.css" ]; then
+    if [ -e "$CFG/waybar/style.css" ]; then
+        waybar >/dev/null 2>&1 &
+    else
+        waybar -s "$(firox-theme path waybar.css)" >/dev/null 2>&1 &
+    fi
 else
-    waybar -s "$(firox-theme path waybar.css)" >/dev/null 2>&1 &
+    (
+        firox-panel 2>"$STATE/panel.log"
+        [ $? -eq 3 ] && exec waybar -s "$(firox-theme path waybar.css)"
+    ) >/dev/null 2>&1 &
 fi
 
 # Notification history for the bell in the notification area (start it
