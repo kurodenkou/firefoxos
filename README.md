@@ -67,6 +67,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 
 ![Battery popup, Classic and Modern](docs/screenshots/battery.png)
 
+![Boot splash](docs/screenshots/boot-splash.png)
+
 ![Power Options on a laptop](docs/screenshots/power-options.png)
 
 ![Clipboard history (Super+V)](docs/screenshots/clipboard-history.png)
