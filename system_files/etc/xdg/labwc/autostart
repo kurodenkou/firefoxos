@@ -16,6 +16,10 @@ else
     waybar -s "$(firox-theme path waybar.css)" >/dev/null 2>&1 &
 fi
 
+# Notification history for the bell in the notification area (start it
+# before anything sends a notification)
+firox-notifications daemon >/dev/null 2>&1 &
+
 # Notifications ("balloon tips")
 if [ -f "$CFG/mako/config" ]; then
     mako >/dev/null 2>&1 &

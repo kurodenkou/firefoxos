@@ -57,6 +57,8 @@ start() {
     f="$(file_for "$id")"
     [ -n "$f" ] || { echo "firox-screensaver: no screen saver called $id" >&2; return 1; }
     running && return 0
+    # Hold notification pop-ups while it runs (they're kept in the history)
+    makoctl mode -a screensaver >/dev/null 2>&1
     cmd="$(field "$f" COMMAND)"
     if [ "$(field "$f" TERMINAL)" = false ]; then
         setsid -f sh -c "exec -a $APP_ID-gui $cmd" >/dev/null 2>&1
@@ -71,6 +73,7 @@ start() {
 }
 
 stop() {
+    makoctl mode -r screensaver >/dev/null 2>&1
     pkill -u "$USER" -f -- "--app-id=$APP_ID" 2>/dev/null
     pkill -u "$USER" -f -- "^$APP_ID-gui" 2>/dev/null
     return 0

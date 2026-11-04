@@ -1,0 +1,71 @@
+/* Notification panel (firox-notifications), Classic look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    margin: 0 4px 4px 0;
+    background-color: #ffffff;
+    border: 1px solid #0831d9;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.45);
+}
+#panel-header {
+    border-radius: 7px 7px 0 0;
+    padding: 6px 10px;
+    background-image: linear-gradient(to bottom,
+        #1868ce 0%, #4a8ae8 6%, #1c64d2 14%, #1a5fcf 80%, #1457c4 100%);
+}
+#panel-header .title { color: #ffffff; font-size: 14px; font-weight: bold; }
+#panel-header button.link {
+    color: #ffffff;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+}
+#panel-header button.link label { color: #ffffff; }
+#panel-header button.link:hover { background-color: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+#panel-header button.link:disabled label { color: rgba(255, 255, 255, 0.5); }
+
+#list { background-color: #ffffff; padding: 4px; }
+#empty { padding: 28px; color: #6b6b6b; }
+
+.notification { border-bottom: 1px solid #e3e9f5; }
+.notification .inner { padding: 8px 6px; }
+.notification:hover { background-color: #eef3fd; }
+.notification.new { background-color: #fffbe0; }
+.notification.critical .summary { color: #b3261e; }
+.notification .app { color: #00136b; font-weight: bold; font-size: 11px; }
+.notification .time { color: #6b6b6b; font-size: 11px; }
+.notification label { font-size: 12px; }
+.notification .app, .notification .time { font-size: 11px; }
+.notification .summary { color: #000000; font-weight: bold; }
+.notification .body { color: #333333; }
+.notification button.close {
+    min-width: 18px; min-height: 18px; padding: 0;
+    background: transparent; border: none; box-shadow: none;
+    color: #6b6b6b;
+}
+.notification button.close:hover { color: #ffffff; background-color: #e2614a; border-radius: 3px; }
+
+#panel-footer {
+    padding: 6px 10px;
+    color: #00136b;
+    background-color: #d3e5fa;
+    border-top: 1px solid #95bdee;
+}
+#panel-footer switch {
+    background-image: none;
+    background-color: #ffffff;
+    border: 1px solid #7f9db9;
+    border-radius: 12px;
+}
+#panel-footer switch:checked { background-color: #2f6fe0; border-color: #1a4ab8; }
+#panel-footer switch slider {
+    background-image: linear-gradient(to bottom, #ffffff, #dce6f5);
+    border: 1px solid #7f9db9;
+    border-radius: 10px;
+    min-width: 18px;
+    min-height: 18px;
+}
