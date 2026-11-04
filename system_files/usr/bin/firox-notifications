@@ -1,0 +1,517 @@
+#!/usr/bin/python3
+"""
+firox-notifications: notification history and Do Not Disturb.
+
+    firox-notifications toggle        show/hide the notification panel
+                                      (the bell in the notification area)
+    firox-notifications dnd [on|off|toggle]
+                                      Do Not Disturb: notifications are kept
+                                      in the panel but don't pop up (urgent
+                                      ones, like a low battery, still do)
+    firox-notifications clear         forget all notifications
+    firox-notifications list          print the history
+    firox-notifications status        JSON for the taskbar bell (waybar)
+    firox-notifications daemon        record notifications (started at login)
+
+Pop-ups disappear after a few seconds; the daemon records every notification
+sent on the session bus (it watches org.freedesktop.Notifications.Notify as a
+D-Bus monitor, so it works whatever shows the pop-ups) into
+~/.local/state/firox/notifications.json, keeping the latest 100.
+"""
+
+import html
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
+LOG = os.path.join(STATE, "notifications.json")
+SEEN = os.path.join(STATE, "notifications-seen")
+DND = os.path.join(STATE, "do-not-disturb")
+KEEP = 100
+WAYBAR_SIGNAL = 9          # "signal": 9 in the waybar module
+BELL, BELL_OFF = "", ""   # Font Awesome bell / bell-slash
+
+
+# ------------------------------------------------------------------ storage --
+
+def load():
+    try:
+        with open(LOG) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save(items):
+    os.makedirs(STATE, exist_ok=True)
+    tmp = LOG + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(items[:KEEP], fh, indent=0)
+    os.replace(tmp, LOG)
+    refresh_taskbar()
+
+
+def read_int(path, default=0):
+    try:
+        with open(path) as fh:
+            return int(fh.read().strip() or default)
+    except (OSError, ValueError):
+        return default
+
+
+def write_text(path, text):
+    os.makedirs(STATE, exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(text)
+
+
+def unread(items):
+    seen = read_int(SEEN)
+    return [n for n in items if n.get("seq", 0) > seen]
+
+
+def mark_seen(items):
+    if items:
+        write_text(SEEN, str(max(n.get("seq", 0) for n in items)))
+        refresh_taskbar()
+
+
+def dnd_on():
+    return os.path.exists(DND)
+
+
+def set_dnd(on):
+    if on:
+        write_text(DND, "1\n")
+    else:
+        try:
+            os.remove(DND)
+        except OSError:
+            pass
+    apply_dnd(on, turning_off=not on)
+    refresh_taskbar()
+
+
+def apply_dnd(on, turning_off=False):
+    """Tell mako; its config hides notifications in the do-not-disturb mode."""
+    try:
+        subprocess.run(["makoctl", "mode", "-a" if on else "-r", "do-not-disturb"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        if turning_off:
+            # Don't flood the screen with everything that arrived meanwhile;
+            # it's all in the panel.
+            subprocess.run(["makoctl", "dismiss", "--all"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def refresh_taskbar():
+    try:
+        out = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "waybar"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for pid in out.split():
+        try:
+            os.kill(int(pid), signal.SIGRTMIN + WAYBAR_SIGNAL)
+        except (OSError, ValueError):
+            pass
+
+
+def plain(text):
+    """Notification bodies may contain simple markup; show them as text."""
+    return html.unescape(re.sub(r"<[^>]*>", "", text or "")).strip()
+
+
+def when(ts):
+    t = time.localtime(ts)
+    now = time.localtime()
+    clock = time.strftime("%I:%M %p", t).lstrip("0")
+    if t[:3] == now[:3]:
+        return clock
+    if time.localtime(time.time() - 86400)[:3] == t[:3]:
+        return f"Yesterday {clock}"
+    return time.strftime("%a %d %b", t)
+
+
+# -------------------------------------------------------------------- status --
+
+def status():
+    items = load()
+    new = unread(items)
+    if dnd_on():
+        text, cls = BELL_OFF, "dnd"
+        tip = "Do Not Disturb is on"
+    else:
+        text, cls = BELL, "unread" if new else "read"
+        tip = "Notifications"
+    if new:
+        text += f" {len(new)}"
+        tip += f"\n{len(new)} new: " + ", ".join(dict.fromkeys(n.get("app") or n.get("summary", "")
+                                                                 for n in new[:5]))
+    tip += "\nClick to open. Right-click for Do Not Disturb."
+    print(json.dumps({"text": text, "tooltip": tip, "class": cls}))
+
+
+# -------------------------------------------------------------------- daemon --
+
+def daemon():
+    from gi.repository import Gio, GLib
+
+    apply_dnd(dnd_on())
+    pending = {}   # (caller, serial) -> seq, to learn the id the server gives back
+
+    def record(msg):
+        try:
+            app, replaces, icon, summary, body, _actions, hints, _timeout = msg.get_body().unpack()
+        except (TypeError, ValueError):
+            return
+        if hints.get("transient") or not (summary or body):
+            return
+        items = load()
+        entry = None
+        if replaces:
+            entry = next((n for n in items if n.get("server_id") == replaces and n.get("app") == app), None)
+            if entry is not None:
+                items.remove(entry)
+        seq = max([n.get("seq", 0) for n in items] + [read_int(SEEN)]) + 1
+        entry = dict(entry or {})
+        entry.update(seq=seq, time=time.time(), app=app, icon=icon or hints.get("image-path") or "",
+                     summary=plain(summary), body=plain(body),
+                     urgency=int(hints.get("urgency", 1)),
+                     desktop_entry=hints.get("desktop-entry") or "")
+        items.insert(0, entry)
+        pending[(msg.get_sender(), msg.get_serial())] = seq
+        save(items)
+
+    def learn_id(msg):
+        seq = pending.pop((msg.get_destination(), msg.get_reply_serial()), None)
+        if seq is None:
+            return
+        try:
+            (server_id,) = msg.get_body().unpack()
+        except (TypeError, ValueError):
+            return
+        items = load()
+        for n in items:
+            if n.get("seq") == seq:
+                n["server_id"] = server_id
+                save(items)
+                break
+
+    def on_message(_conn, msg, incoming):
+        if not incoming:
+            return msg            # our own BecomeMonitor call
+        kind = msg.get_message_type()
+        if kind == Gio.DBusMessageType.METHOD_CALL:
+            if msg.get_member() == "Notify":
+                GLib.idle_add(lambda: record(msg) and False)
+            return None           # a monitor must never answer
+        if (kind == Gio.DBusMessageType.METHOD_RETURN and msg.get_reply_serial()
+                and msg.get_sender() != "org.freedesktop.DBus"):   # not our own BecomeMonitor reply
+            # Queued after the Notify it answers, so record() has run first
+            GLib.idle_add(lambda: learn_id(msg) and False)
+            return None
+        return msg
+
+    address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+    conn = Gio.DBusConnection.new_for_address_sync(
+        address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+    conn.add_filter(on_message)
+    conn.call_sync(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Monitoring",
+        "BecomeMonitor",
+        GLib.Variant("(asu)", ([
+            "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
+            "type='method_return',sender='org.freedesktop.Notifications'",
+        ], 0)),
+        None, Gio.DBusCallFlags.NONE, -1, None)
+    refresh_taskbar()
+    GLib.MainLoop().run()
+
+
+# --------------------------------------------------------------------- panel --
+
+def panel(argv):
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk, Gio, GLib, Gtk
+    try:
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import GtkLayerShell
+    except (ValueError, ImportError):
+        GtkLayerShell = None
+
+    themes = "/usr/share/firox/themes"
+
+    def theme_css():
+        cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        name = "classic"
+        for path in (os.path.join(cfg, "firox", "theme"), "/etc/firox/theme"):
+            try:
+                with open(path) as fh:
+                    name = fh.read().strip() or name
+                break
+            except OSError:
+                continue
+        path = os.path.join(themes, name, "notifications.css")
+        return path if os.path.exists(path) else os.path.join(themes, "classic", "notifications.css")
+
+    def icon_for(n):
+        icon = n.get("icon") or ""
+        img = Gtk.Image()
+        if icon.startswith("file://"):
+            icon = icon[7:]
+        if icon.startswith("/") and os.path.exists(icon):
+            img.set_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(icon)), Gtk.IconSize.DIALOG)
+        else:
+            if not icon and n.get("desktop_entry"):
+                try:
+                    info = Gio.DesktopAppInfo.new(n["desktop_entry"] + ".desktop")
+                    if info and info.get_icon():
+                        img.set_from_gicon(info.get_icon(), Gtk.IconSize.DIALOG)
+                        img.set_pixel_size(32)
+                        return img
+                except TypeError:
+                    pass
+            theme = Gtk.IconTheme.get_default()
+            name = icon if icon and theme.has_icon(icon) else (
+                "dialog-warning" if n.get("urgency") == 2 else "dialog-information")
+            img.set_from_icon_name(name, Gtk.IconSize.DIALOG)
+        img.set_pixel_size(32)
+        return img
+
+    class Panel(Gtk.Window):
+        def __init__(self, app):
+            super().__init__(application=app, title="Notifications")
+            self.set_decorated(False)
+            screen = self.get_screen()
+            visual = screen.get_rgba_visual()
+            if visual is not None:
+                self.set_visual(visual)
+            self.set_app_paintable(True)
+            self.provider = Gtk.CssProvider()
+            Gtk.StyleContext.add_provider_for_screen(screen, self.provider,
+                                                     Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            if GtkLayerShell and GtkLayerShell.is_supported():
+                GtkLayerShell.init_for_window(self)
+                GtkLayerShell.set_namespace(self, "firox-notifications")
+                GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+                for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                             GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+                    GtkLayerShell.set_anchor(self, edge, True)
+                # Cover the screen except the taskbar, so clicking anywhere
+                # else closes the panel and the bell still toggles it
+                GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+            catcher = Gtk.EventBox()
+            catcher.set_visible_window(False)
+            catcher.connect("button-press-event", lambda *_: self.hide() or True)
+            self.add(catcher)
+            self.connect("key-press-event", self.on_key)
+            self.connect("delete-event", lambda *_: self.hide() or True)
+
+            swallow = Gtk.EventBox()
+            swallow.set_visible_window(False)
+            swallow.connect("button-press-event", lambda *_: True)
+            swallow.set_halign(Gtk.Align.END)
+            swallow.set_valign(Gtk.Align.END)
+            catcher.add(swallow)
+
+            self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            self.box.set_name("panel")
+            self.box.set_size_request(380, -1)
+            swallow.add(self.box)
+
+            header = Gtk.Box(spacing=8)
+            header.set_name("panel-header")
+            title = Gtk.Label(label="Notifications", xalign=0)
+            title.get_style_context().add_class("title")
+            header.pack_start(title, True, True, 0)
+            self.clear_btn = Gtk.Button(label="Clear all")
+            self.clear_btn.get_style_context().add_class("link")
+            self.clear_btn.connect("clicked", self.on_clear)
+            header.pack_end(self.clear_btn, False, False, 0)
+            self.box.pack_start(header, False, False, 0)
+
+            self.scroll = Gtk.ScrolledWindow()
+            self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            self.scroll.set_propagate_natural_height(True)
+            self.scroll.set_max_content_height(460)
+            self.list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            self.list.set_name("list")
+            self.scroll.add(self.list)
+            self.box.pack_start(self.scroll, True, True, 0)
+
+            footer = Gtk.Box(spacing=8)
+            footer.set_name("panel-footer")
+            label = Gtk.Label(xalign=0)
+            label.set_markup("Do not disturb\n<small>Pop-ups are hidden; urgent ones still show</small>")
+            footer.pack_start(label, True, True, 0)
+            self.dnd = Gtk.Switch(valign=Gtk.Align.CENTER)
+            self.dnd.connect("notify::active", self.on_dnd)
+            footer.pack_end(self.dnd, False, False, 0)
+            self.box.pack_start(footer, False, False, 0)
+
+        def on_key(self, _w, event):
+            if event.keyval == Gdk.KEY_Escape:
+                self.hide()
+            return False
+
+        def fill(self):
+            try:
+                self.provider.load_from_path(theme_css())
+            except GLib.Error as err:
+                print(f"notifications: {err.message}", file=sys.stderr)
+            for child in self.list.get_children():
+                child.destroy()
+            items = load()
+            self.clear_btn.set_sensitive(bool(items))
+            if not items:
+                empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                empty.set_name("empty")
+                img = Gtk.Image.new_from_icon_name("notifications-disabled", Gtk.IconSize.DIALOG)
+                if not Gtk.IconTheme.get_default().has_icon("notifications-disabled"):
+                    img = Gtk.Image.new_from_icon_name("dialog-information", Gtk.IconSize.DIALOG)
+                img.set_pixel_size(40)
+                empty.pack_start(img, False, False, 0)
+                empty.pack_start(Gtk.Label(label="No notifications"), False, False, 0)
+                self.list.pack_start(empty, False, False, 0)
+            new = {n.get("seq") for n in unread(items)}
+            for n in items:
+                self.list.pack_start(self.row(n, n.get("seq") in new), False, False, 0)
+            self.dnd.handler_block_by_func(self.on_dnd)
+            self.dnd.set_active(dnd_on())
+            self.dnd.handler_unblock_by_func(self.on_dnd)
+            self.box.show_all()
+            mark_seen(items)
+
+        def row(self, n, is_new):
+            ev = Gtk.EventBox()
+            ev.get_style_context().add_class("notification")
+            if is_new:
+                ev.get_style_context().add_class("new")
+            if n.get("urgency") == 2:
+                ev.get_style_context().add_class("critical")
+            outer = Gtk.Box(spacing=10)
+            outer.get_style_context().add_class("inner")
+            img = icon_for(n)
+            img.set_valign(Gtk.Align.START)
+            outer.pack_start(img, False, False, 0)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            top = Gtk.Box(spacing=6)
+            app = Gtk.Label(label=n.get("app") or "Notification", xalign=0)
+            app.get_style_context().add_class("app")
+            app.set_ellipsize(3)
+            top.pack_start(app, True, True, 0)
+            t = Gtk.Label(label=when(n.get("time", 0)))
+            t.get_style_context().add_class("time")
+            top.pack_start(t, False, False, 0)
+            close = Gtk.Button(label="×")
+            close.get_style_context().add_class("close")
+            close.set_tooltip_text("Remove")
+            close.connect("clicked", lambda _b, seq=n.get("seq"): self.remove(seq))
+            top.pack_start(close, False, False, 0)
+            text.pack_start(top, False, False, 0)
+            if n.get("summary"):
+                s = Gtk.Label(label=n["summary"], xalign=0, wrap=True, max_width_chars=38)
+                s.set_line_wrap_mode(2)
+                s.get_style_context().add_class("summary")
+                text.pack_start(s, False, False, 0)
+            if n.get("body"):
+                b = Gtk.Label(label=n["body"], xalign=0, wrap=True, max_width_chars=38, lines=4)
+                b.set_line_wrap_mode(2)
+                b.set_ellipsize(3)
+                b.get_style_context().add_class("body")
+                text.pack_start(b, False, False, 0)
+            outer.pack_start(text, True, True, 0)
+            ev.add(outer)
+            if n.get("desktop_entry"):
+                ev.set_tooltip_text("Click to open " + (n.get("app") or "the app"))
+                ev.connect("button-press-event", lambda *_a, d=n["desktop_entry"]: self.open_app(d))
+            return ev
+
+        def open_app(self, desktop_id):
+            try:
+                info = Gio.DesktopAppInfo.new(desktop_id + ".desktop")
+                if info:
+                    info.launch([], Gdk.Display.get_default().get_app_launch_context())
+            except (TypeError, GLib.Error):
+                pass
+            self.hide()
+            return True
+
+        def remove(self, seq):
+            save([n for n in load() if n.get("seq") != seq])
+            self.fill()
+
+        def on_clear(self, _b):
+            save([])
+            self.fill()
+
+        def on_dnd(self, sw, _p):
+            set_dnd(sw.get_active())
+
+    class App(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id="org.firox.Notifications",
+                             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+            self.win = None
+
+        def do_command_line(self, cmdline):
+            args = cmdline.get_arguments()[1:]
+            if self.win is None:
+                self.win = Panel(self)
+            if args[:1] == ["hide"] or (args[:1] == ["toggle"] and self.win.get_visible()):
+                self.win.hide()
+            else:
+                self.win.fill()
+                self.win.show_all()
+                self.win.present()
+            return 0
+
+    return App().run(argv)
+
+
+# ---------------------------------------------------------------------- main --
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "toggle"
+    if cmd == "daemon":
+        daemon()
+        return 0
+    if cmd == "status":
+        status()
+        return 0
+    if cmd in ("toggle", "show", "hide"):
+        return panel([argv[0], cmd])
+    if cmd == "dnd":
+        arg = argv[2] if len(argv) > 2 else "toggle"
+        if arg not in ("on", "off", "toggle"):
+            print("usage: firox-notifications dnd [on|off|toggle]", file=sys.stderr)
+            return 2
+        set_dnd(not dnd_on() if arg == "toggle" else arg == "on")
+        print("Do Not Disturb is " + ("on" if dnd_on() else "off"))
+        return 0
+    if cmd == "clear":
+        save([])
+        return 0
+    if cmd == "list":
+        for n in load():
+            print(f"{when(n.get('time', 0)):>18}  {n.get('app', '')}: {n.get('summary', '')}"
+                  + (f" - {n['body']}" if n.get("body") else ""))
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

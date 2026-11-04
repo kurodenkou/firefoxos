@@ -1,4 +1,4 @@
-# Firox Linux login screen: gtkgreet in the cage kiosk compositor, styled to
+# Firox Linux login screen: firox-welcome in the cage kiosk compositor, styled to
 # match the default look (/etc/firox/theme). See /usr/bin/firox-greeter.
 [terminal]
 vt = 1

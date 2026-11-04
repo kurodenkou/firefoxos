@@ -19,6 +19,7 @@
         "idle_inhibitor",
         "pulseaudio",
         "battery",
+        "custom/notifications",
         "clock"
     ],
 
@@ -64,6 +65,16 @@
         "all-outputs": false
     },
 
+    // Notification history + Do Not Disturb (firox-notifications)
+    "custom/notifications": {
+        "exec": "firox-notifications status",
+        "return-type": "json",
+        "signal": 9,
+        "interval": 60,
+        "on-click": "firox-notifications toggle",
+        "on-click-right": "firox-notifications dnd toggle",
+        "tooltip": true
+    },
     "tray": {
         "icon-size": 16,
         "spacing": 6

@@ -1,0 +1,54 @@
+/* Notification panel (firox-notifications), Modern look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    color: #e8e8e8;
+    margin: 0 6px 6px 0;
+    background-color: rgba(36, 36, 36, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+#panel-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+#panel-header .title { color: #f2f2f2; font-size: 14px; font-weight: bold; }
+#panel-header button.link {
+    color: #d0d0d0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+}
+#panel-header button.link:hover { background-color: rgba(255, 255, 255, 0.10); border-radius: 4px; }
+#panel-header button.link:disabled label { color: #707070; }
+
+#list { padding: 4px; }
+#empty { padding: 28px; color: #9a9a9a; }
+
+.notification { border-radius: 6px; margin: 2px 0; }
+.notification .inner { padding: 8px; }
+.notification:hover { background-color: rgba(255, 255, 255, 0.06); }
+.notification.new { background-color: rgba(255, 255, 255, 0.09); }
+.notification.critical .summary { color: #ff9a8a; }
+.notification .app { color: #b8b8b8; font-size: 11px; }
+.notification .time { color: #8a8a8a; font-size: 11px; }
+.notification label { font-size: 12px; }
+.notification .app, .notification .time { font-size: 11px; }
+.notification .summary { color: #f2f2f2; font-weight: bold; }
+.notification .body { color: #d0d0d0; }
+.notification button.close {
+    min-width: 18px; min-height: 18px; padding: 0;
+    background: transparent; border: none; box-shadow: none;
+    color: #8a8a8a;
+}
+.notification button.close:hover { color: #ffffff; background-color: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+
+#panel-footer {
+    padding: 8px 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+#panel-footer small { color: #9a9a9a; }

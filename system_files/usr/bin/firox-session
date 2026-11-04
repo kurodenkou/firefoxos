@@ -25,6 +25,15 @@ if [ -f "$CFG/labwc/rc.xml" ]; then
     sed -i 's|<name>FirefoxOS</name>|<name>Firox</name>|' "$CFG/labwc/rc.xml"
 fi
 
+# Mouse, touchpad and keyboard settings (Settings > Mouse / Keyboard):
+# firox-input writes labwc config with them into a folder that labwc checks
+# after ~/.config/labwc and before /etc/xdg/labwc
+export XDG_CONFIG_DIRS="$DATA/firox/xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+firox-input apply --no-reload
+
+# Show the account picture on the login screen (if it changed)
+/usr/libexec/firox/account-picture >/dev/null 2>&1 &
+
 # Point the "Firox" window theme at the user's Classic/Modern choice
 # before labwc loads it
 firox-theme sync

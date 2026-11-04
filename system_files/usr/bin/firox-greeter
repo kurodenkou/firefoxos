@@ -1,11 +1,27 @@
 #!/usr/bin/bash
 # Login screen launcher (run by greetd as the "greetd" user).
-# Styles gtkgreet with the system default look from /etc/firox/theme.
+# Shows firox-welcome ("To begin, click your user name", with account
+# pictures) in the cage kiosk compositor, styled with the system default look
+# from /etc/firox/theme. If it can't start, falls back to gtkgreet so you can
+# always log in.
 THEMES=/usr/share/firox/themes
 theme="$(cat /etc/firox/theme 2>/dev/null || echo modern)"
-[ -f "$THEMES/$theme/greeter.css" ] || theme=classic
+[ -f "$THEMES/$theme/welcome.css" ] || theme=classic
 case "$theme" in
     modern) export GTK_THEME=adw-gtk3-dark ;;
     *)      export GTK_THEME=adw-gtk3 ;;
 esac
-exec cage -d -s -m last -- gtkgreet -s "$THEMES/$theme/greeter.css"
+
+# Keyboard layout chosen when installing (localectl), so passwords type right
+kbd=/etc/X11/xorg.conf.d/00-keyboard.conf
+if [ -f "$kbd" ]; then
+    l="$(sed -n 's/.*Option *"XkbLayout" *"\([^"]*\)".*/\1/p' "$kbd" | head -n1)"
+    v="$(sed -n 's/.*Option *"XkbVariant" *"\([^"]*\)".*/\1/p' "$kbd" | head -n1)"
+    [ -n "$l" ] && export XKB_DEFAULT_LAYOUT="$l"
+    [ -n "$v" ] && export XKB_DEFAULT_VARIANT="$v"
+fi
+
+css="$THEMES/$theme/greeter.css"
+[ -f "$css" ] || css="$THEMES/classic/greeter.css"
+exec cage -d -s -m last -- sh -c \
+    'firox-welcome --theme "$1" || exec gtkgreet -s "$2"' sh "$theme" "$css"
