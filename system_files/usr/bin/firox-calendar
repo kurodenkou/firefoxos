@@ -1,0 +1,186 @@
+#!/usr/bin/python3
+"""
+firox-calendar: the clock popup (click the clock on the taskbar).
+
+    firox-calendar [toggle|show|hide]
+
+Shows the time, today's date and a month calendar above the clock, with a link
+to Date and Time settings. Closes on Esc or a click anywhere else. Styled by
+the theme's calendar.css.
+"""
+
+import os
+import sys
+import time
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell  # noqa: E402
+except (ValueError, ImportError):
+    GtkLayerShell = None
+
+THEMES = "/usr/share/firox/themes"
+
+
+def theme_css():
+    cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    name = "classic"
+    for path in (os.path.join(cfg, "firox", "theme"), "/etc/firox/theme"):
+        try:
+            with open(path) as fh:
+                name = fh.read().strip() or name
+            break
+        except OSError:
+            continue
+    path = os.path.join(THEMES, name, "calendar.css")
+    return path if os.path.exists(path) else os.path.join(THEMES, "classic", "calendar.css")
+
+
+class Popup(Gtk.Window):
+    def __init__(self, app):
+        super().__init__(application=app, title="Calendar")
+        self.set_decorated(False)
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+        self.set_app_paintable(True)
+        self.provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_screen(screen, self.provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        if GtkLayerShell and GtkLayerShell.is_supported():
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_namespace(self, "firox-calendar")
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+            for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                         GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+                GtkLayerShell.set_anchor(self, edge, True)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+
+        # Covers the screen above the taskbar: clicking outside closes it
+        catcher = Gtk.EventBox()
+        catcher.set_visible_window(False)
+        catcher.connect("button-press-event", lambda *_: self.hide() or True)
+        self.add(catcher)
+        self.connect("key-press-event", self.on_key)
+        self.connect("delete-event", lambda *_: self.hide() or True)
+
+        swallow = Gtk.EventBox()
+        swallow.set_visible_window(False)
+        swallow.connect("button-press-event", lambda *_: True)
+        swallow.set_halign(Gtk.Align.END)
+        swallow.set_valign(Gtk.Align.END)
+        catcher.add(swallow)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_name("panel")
+        swallow.add(box)
+
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        head.set_name("panel-header")
+        self.clock = Gtk.Label(xalign=0)
+        self.clock.set_name("time")
+        self.date = Gtk.Label(xalign=0)
+        self.date.set_name("date")
+        head.pack_start(self.clock, False, False, 0)
+        head.pack_start(self.date, False, False, 0)
+        box.pack_start(head, False, False, 0)
+
+        self.calendar = Gtk.Calendar()
+        self.calendar.set_name("calendar")
+        self.calendar.set_display_options(Gtk.CalendarDisplayOptions.SHOW_HEADING
+                                          | Gtk.CalendarDisplayOptions.SHOW_DAY_NAMES
+                                          | Gtk.CalendarDisplayOptions.SHOW_WEEK_NUMBERS)
+        self.calendar.connect("month-changed", lambda *_: self.mark_today())
+        box.pack_start(self.calendar, False, False, 0)
+
+        foot = Gtk.Box(spacing=8)
+        foot.set_name("panel-footer")
+        today = Gtk.Button(label="Today")
+        today.get_style_context().add_class("link")
+        today.connect("clicked", lambda _b: self.go_today())
+        foot.pack_start(today, False, False, 0)
+        settings = Gtk.Button(label="Date and time settings…")
+        settings.get_style_context().add_class("link")
+        settings.connect("clicked", self.on_settings)
+        foot.pack_end(settings, False, False, 0)
+        box.pack_start(foot, False, False, 0)
+
+        self.timer = None
+
+    def tick(self):
+        now = time.localtime()
+        self.clock.set_text(time.strftime("%I:%M:%S %p", now).lstrip("0"))
+        self.date.set_text(time.strftime("%A, %B ", now) + str(now.tm_mday) + time.strftime(", %Y", now))
+        return True
+
+    def mark_today(self):
+        now = time.localtime()
+        self.calendar.clear_marks()
+        y, m, _d = self.calendar.get_date()
+        if (y, m + 1) == (now.tm_year, now.tm_mon):
+            self.calendar.mark_day(now.tm_mday)
+
+    def go_today(self):
+        now = time.localtime()
+        self.calendar.select_month(now.tm_mon - 1, now.tm_year)
+        self.calendar.select_day(now.tm_mday)
+        self.mark_today()
+
+    def on_settings(self, _b):
+        self.hide()
+        try:
+            GLib.spawn_async(["firox-control-panel", "datetime"], flags=GLib.SpawnFlags.SEARCH_PATH)
+        except GLib.Error:
+            pass
+
+    def on_key(self, _w, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide()
+        return False
+
+    def open(self):
+        try:
+            self.provider.load_from_path(theme_css())
+        except GLib.Error as err:
+            print(f"calendar: {err.message}", file=sys.stderr)
+        self.go_today()
+        self.tick()
+        if self.timer is None:
+            self.timer = GLib.timeout_add(1000, self.tick)
+        self.show_all()
+        self.present()
+
+    def do_hide(self):
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        Gtk.Window.do_hide(self)
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Calendar",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        cmd = args[0] if args else "toggle"
+        if self.win is None:
+            self.win = Popup(self)
+        if cmd == "hide" or (cmd == "toggle" and self.win.get_visible()):
+            self.win.hide()
+        else:
+            self.win.open()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

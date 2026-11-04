@@ -1,0 +1,421 @@
+#!/usr/bin/python3
+"""
+firox-snip: Snipping Tool.
+
+    firox-snip              open the Snipping Tool
+    firox-snip --region     snip a rectangle right away (Super+Shift+S)
+    firox-snip --full       snip the whole screen
+    firox-snip --monitor    snip one monitor (click it)
+
+Every snip is copied to the clipboard straight away and shown in the window,
+where you can mark it up with a pen or highlighter, copy it again, or save it
+(to Pictures/Screenshots, or anywhere with Save As). Uses grim and slurp.
+"""
+
+import io
+import os
+import subprocess
+import sys
+import time
+
+import cairo
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+
+MODES = [("region", "Rectangle"), ("full", "Full screen"), ("monitor", "One monitor")]
+DELAYS = [(0, "No delay"), (3, "3 seconds"), (5, "5 seconds"), (10, "10 seconds")]
+TOOLS = {
+    "pen": {"rgb": (0.88, 0.11, 0.14), "alpha": 1.0, "width": 4},
+    "highlighter": {"rgb": (1.0, 0.92, 0.0), "alpha": 0.4, "width": 18},
+}
+
+
+def pictures_dir():
+    try:
+        out = subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True, text=True,
+                             timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    return os.path.join(out or os.path.expanduser("~/Pictures"), "Screenshots")
+
+
+def default_name():
+    return time.strftime("Screenshot %Y-%m-%d %H-%M-%S.png")
+
+
+def notify(summary, body="", timeout_ms=None, transient=True):
+    args = ["notify-send", "-a", "Snipping Tool", "-i", "accessories-screenshot", "-p"]
+    if timeout_ms:
+        args += ["-t", str(timeout_ms)]
+    if transient:
+        args.append("-e")
+    try:
+        return subprocess.run(args + [summary, body], capture_output=True, text=True,
+                              timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+class Snip(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Snipping Tool")
+        self.set_icon_name("accessories-screenshot")
+        self.set_default_size(560, 160)
+        self.pixbuf = None
+        self.strokes = []
+        self.current = None
+        self.scale = 1.0
+        self.shown_before = False
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+        bar = Gtk.Box(spacing=6, border_width=6)
+        root.pack_start(bar, False, False, 0)
+
+        new = Gtk.Button()
+        nb = Gtk.Box(spacing=6)
+        nb.pack_start(Gtk.Image.new_from_icon_name("accessories-screenshot", Gtk.IconSize.BUTTON),
+                      False, False, 0)
+        nb.pack_start(Gtk.Label(label="New"), False, False, 0)
+        new.add(nb)
+        new.set_tooltip_text("Take a new snip (Ctrl+N)")
+        new.connect("clicked", lambda _b: self.start())
+        bar.pack_start(new, False, False, 0)
+
+        self.mode = Gtk.ComboBoxText()
+        for key, label in MODES:
+            self.mode.append(key, label)
+        self.mode.set_active_id("region")
+        self.mode.set_tooltip_text("What to snip")
+        bar.pack_start(self.mode, False, False, 0)
+        self.delay = Gtk.ComboBoxText()
+        for secs, label in DELAYS:
+            self.delay.append(str(secs), label)
+        self.delay.set_active_id("0")
+        self.delay.set_tooltip_text("Wait before snipping, e.g. to open a menu first")
+        bar.pack_start(self.delay, False, False, 0)
+
+        bar.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 4)
+        self.tool_buttons = {}
+        for key, label, icon in (("pen", "Pen", "draw-freehand"),
+                                 ("highlighter", "Highlighter", "draw-highlight")):
+            b = Gtk.ToggleButton()
+            b.add(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.BUTTON))
+            b.set_tooltip_text(label)
+            b.connect("toggled", self.on_tool, key)
+            self.tool_buttons[key] = b
+            bar.pack_start(b, False, False, 0)
+        self.undo_btn = Gtk.Button()
+        self.undo_btn.add(Gtk.Image.new_from_icon_name("edit-undo", Gtk.IconSize.BUTTON))
+        self.undo_btn.set_tooltip_text("Undo (Ctrl+Z)")
+        self.undo_btn.connect("clicked", lambda _b: self.undo())
+        bar.pack_start(self.undo_btn, False, False, 0)
+
+        self.save_as_btn = Gtk.Button(label="Save As…")
+        self.save_as_btn.connect("clicked", lambda _b: self.save_as())
+        bar.pack_end(self.save_as_btn, False, False, 0)
+        self.save_btn = Gtk.Button(label="Save")
+        self.save_btn.set_tooltip_text("Save to Pictures/Screenshots (Ctrl+S)")
+        self.save_btn.connect("clicked", lambda _b: self.save())
+        bar.pack_end(self.save_btn, False, False, 0)
+        self.copy_btn = Gtk.Button(label="Copy")
+        self.copy_btn.set_tooltip_text("Copy to the clipboard (Ctrl+C)")
+        self.copy_btn.connect("clicked", lambda _b: self.copy())
+        bar.pack_end(self.copy_btn, False, False, 0)
+
+        self.stack = Gtk.Stack()
+        root.pack_start(self.stack, True, True, 0)
+        hint = Gtk.Label(justify=Gtk.Justification.CENTER)
+        hint.set_markup("Click <b>New</b> to snip part of the screen.\n"
+                        "<small>Shortcut: Super+Shift+S. Print Screen saves the whole screen.</small>")
+        hint.get_style_context().add_class("dim-label")
+        self.stack.add_named(hint, "empty")
+        self.scroll = Gtk.ScrolledWindow()
+        self.area = Gtk.DrawingArea()
+        self.area.set_halign(Gtk.Align.CENTER)
+        self.area.set_valign(Gtk.Align.CENTER)
+        self.area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
+                             | Gdk.EventMask.POINTER_MOTION_MASK)
+        self.area.connect("draw", self.on_draw)
+        self.area.connect("button-press-event", self.on_press)
+        self.area.connect("motion-notify-event", self.on_motion)
+        self.area.connect("button-release-event", self.on_release)
+        self.scroll.add(self.area)
+        self.scroll.connect("size-allocate", lambda *_: self.fit())
+        self.stack.add_named(self.scroll, "image")
+
+        self.status = Gtk.Label(xalign=0, ellipsize=3, margin=6)
+        self.status.get_style_context().add_class("dim-label")
+        root.pack_start(self.status, False, False, 0)
+
+        self.connect("key-press-event", self.on_key)
+        self.sync()
+
+    # ------------------------------------------------------------ capture --
+
+    def start(self, mode=None):
+        mode = mode or self.mode.get_active_id()
+        delay = int(self.delay.get_active_id() or 0)
+        self.hide()
+        note = None
+        if delay:
+            note = notify("Snipping in %d seconds…" % delay, "", timeout_ms=delay * 1000 - 400)
+        # Give the compositor time to remove our window from the screen
+        GLib.timeout_add(max(300, delay * 1000), self.capture, mode, note)
+
+    def capture(self, mode, note):
+        if note:
+            subprocess.run(["makoctl", "dismiss", "-n", note], stderr=subprocess.DEVNULL)
+            time.sleep(0.25)
+        cmd = ["grim"]
+        if mode in ("region", "monitor"):
+            slurp = ["slurp", "-d"] if mode == "region" else ["slurp", "-o", "-r"]
+            r = subprocess.run(slurp, capture_output=True, text=True)
+            if r.returncode != 0 or not r.stdout.strip():
+                # Cancelled (Esc): back to the window, or just stop if it was
+                # started by the shortcut and never shown
+                if self.shown_before:
+                    self.show_window()
+                else:
+                    self.destroy()
+                return False
+            cmd += ["-g", r.stdout.strip()]
+        r = subprocess.run(cmd + ["-"], capture_output=True)
+        if r.returncode != 0 or not r.stdout:
+            self.set_status("Couldn't take the screenshot: " + r.stderr.decode(errors="replace").strip())
+            self.show_window()
+            return False
+        loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+        loader.write(r.stdout)
+        loader.close()
+        self.pixbuf = loader.get_pixbuf()
+        self.strokes = []
+        self.stack.set_visible_child_name("image")
+        self.copy_bytes(r.stdout)
+        w, h = self.pixbuf.get_width(), self.pixbuf.get_height()
+        self.set_status(f"Copied to the clipboard ({w} × {h}). Draw on it, or Save.")
+        self.show_window(grow=True)
+        return False
+
+    def show_window(self, grow=False):
+        if grow and self.pixbuf is not None:
+            disp = Gdk.Display.get_default()
+            mon = disp.get_primary_monitor() or disp.get_monitor(0)
+            geo = mon.get_workarea() if mon else None
+            maxw, maxh = (geo.width * 0.8, geo.height * 0.8) if geo else (1000, 700)
+            w = min(maxw, max(560, self.pixbuf.get_width() + 24))
+            h = min(maxh, max(300, self.pixbuf.get_height() + 110))
+            self.resize(int(w), int(h))
+        self.shown_before = True
+        self.sync()
+        self.show_all()
+        # (A Gtk.Stack only switches to a page that's visible, so do it after show_all)
+        self.stack.set_visible_child_name("image" if self.pixbuf is not None else "empty")
+        self.present()
+        GLib.idle_add(lambda: self.fit() and False)
+
+    # ------------------------------------------------------------ drawing --
+
+    def fit(self):
+        if self.pixbuf is None:
+            return
+        alloc = self.scroll.get_allocation()
+        w, h = self.pixbuf.get_width(), self.pixbuf.get_height()
+        s = min(1.0, max(alloc.width - 4, 50) / w, max(alloc.height - 4, 50) / h)
+        if abs(s - self.scale) > 0.001 or self.area.get_size_request() != (int(w * s), int(h * s)):
+            self.scale = s
+            self.area.set_size_request(int(w * s), int(h * s))
+            self.area.queue_draw()
+
+    def paint(self, cr):
+        Gdk.cairo_set_source_pixbuf(cr, self.pixbuf, 0, 0)
+        cr.paint()
+        for st in self.strokes + ([self.current] if self.current else []):
+            tool = TOOLS[st["tool"]]
+            pts = st["points"]
+            if not pts:
+                continue
+            cr.set_source_rgba(*tool["rgb"], tool["alpha"])
+            cr.set_line_width(st["width"])
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.move_to(*pts[0])
+            for p in pts[1:] or [(pts[0][0] + 0.1, pts[0][1])]:
+                cr.line_to(*p)
+            cr.stroke()
+
+    def on_draw(self, _w, cr):
+        if self.pixbuf is None:
+            return False
+        cr.scale(self.scale, self.scale)
+        self.paint(cr)
+        return False
+
+    def active_tool(self):
+        return next((k for k, b in self.tool_buttons.items() if b.get_active()), None)
+
+    def on_tool(self, button, key):
+        if button.get_active():
+            for k, b in self.tool_buttons.items():
+                if k != key and b.get_active():
+                    b.set_active(False)
+        win = self.area.get_window()
+        if win is not None:
+            cursor = Gdk.Cursor.new_from_name(win.get_display(), "crosshair" if self.active_tool() else "default")
+            win.set_cursor(cursor)
+
+    def on_press(self, _w, event):
+        tool = self.active_tool()
+        if tool is None or self.pixbuf is None or event.button != 1:
+            return False
+        # Line width in image pixels, so it looks the same however it's zoomed
+        width = TOOLS[tool]["width"] / max(self.scale, 0.1)
+        self.current = {"tool": tool, "width": width,
+                        "points": [(event.x / self.scale, event.y / self.scale)]}
+        return True
+
+    def on_motion(self, _w, event):
+        if self.current is not None:
+            self.current["points"].append((event.x / self.scale, event.y / self.scale))
+            self.area.queue_draw()
+        return False
+
+    def on_release(self, _w, _event):
+        if self.current is not None:
+            self.strokes.append(self.current)
+            self.current = None
+            self.sync()
+            self.area.queue_draw()
+        return False
+
+    def undo(self):
+        if self.strokes:
+            self.strokes.pop()
+            self.sync()
+            self.area.queue_draw()
+
+    # ------------------------------------------------------- copy / save --
+
+    def render_png(self):
+        w, h = self.pixbuf.get_width(), self.pixbuf.get_height()
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(surface)
+        self.paint(cr)
+        buf = io.BytesIO()
+        surface.write_to_png(buf)
+        return buf.getvalue()
+
+    def copy_bytes(self, data):
+        try:
+            subprocess.run(["wl-copy", "-t", "image/png"], input=data, timeout=10)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def copy(self):
+        if self.pixbuf is not None and self.copy_bytes(self.render_png()):
+            self.set_status("Copied to the clipboard.")
+
+    def write(self, path):
+        data = self.render_png()
+        if path.lower().endswith((".jpg", ".jpeg")):
+            loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+            loader.write(data)
+            loader.close()
+            loader.get_pixbuf().savev(path, "jpeg", ["quality"], ["92"])
+        else:
+            with open(path, "wb") as fh:
+                fh.write(data)
+
+    def save(self):
+        if self.pixbuf is None:
+            return
+        folder = pictures_dir()
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, default_name())
+        try:
+            self.write(path)
+        except (OSError, GLib.Error) as err:
+            self.set_status(f"Couldn't save: {err}")
+            return
+        self.set_status(f"Saved to {path.replace(os.path.expanduser('~'), '~')}")
+
+    def save_as(self):
+        if self.pixbuf is None:
+            return
+        dlg = Gtk.FileChooserDialog(title="Save Snip As", transient_for=self,
+                                    action=Gtk.FileChooserAction.SAVE)
+        dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Save", Gtk.ResponseType.ACCEPT)
+        dlg.set_do_overwrite_confirmation(True)
+        folder = pictures_dir()
+        os.makedirs(folder, exist_ok=True)
+        dlg.set_current_folder(folder)
+        dlg.set_current_name(default_name())
+        for name, pattern in (("PNG image", "*.png"), ("JPEG image", "*.jpg")):
+            f = Gtk.FileFilter()
+            f.set_name(name)
+            f.add_pattern(pattern)
+            dlg.add_filter(f)
+        if dlg.run() == Gtk.ResponseType.ACCEPT:
+            path = dlg.get_filename()
+            if not path.lower().endswith((".png", ".jpg", ".jpeg")):
+                path += ".png"
+            try:
+                self.write(path)
+                self.set_status(f"Saved to {path.replace(os.path.expanduser('~'), '~')}")
+            except (OSError, GLib.Error) as err:
+                self.set_status(f"Couldn't save: {err}")
+        dlg.destroy()
+
+    # --------------------------------------------------------------- misc --
+
+    def set_status(self, text):
+        self.status.set_text(text)
+
+    def sync(self):
+        have = self.pixbuf is not None
+        for w in (self.copy_btn, self.save_btn, self.save_as_btn, *self.tool_buttons.values()):
+            w.set_sensitive(have)
+        self.undo_btn.set_sensitive(bool(self.strokes))
+        if not have:
+            self.stack.set_visible_child_name("empty")
+
+    def on_key(self, _w, event):
+        if event.state & Gdk.ModifierType.CONTROL_MASK:
+            key = Gdk.keyval_name(event.keyval).lower()
+            action = {"n": self.start, "c": self.copy, "s": self.save, "z": self.undo}.get(key)
+            if action:
+                action()
+                return True
+        return False
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.SnippingTool",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        if self.win is None:
+            self.win = Snip(self)
+        mode = {"--region": "region", "--full": "full", "--monitor": "monitor"}.get(args[0] if args else "")
+        if args and mode is None:
+            print(__doc__.strip(), file=sys.stderr)
+            return 2
+        if mode:
+            self.win.mode.set_active_id(mode)
+            self.hold()
+            GLib.idle_add(lambda: (self.win.start(mode), self.release(), False)[2])
+        else:
+            self.win.show_window()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

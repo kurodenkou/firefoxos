@@ -56,6 +56,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Notifications | mako pop-ups, plus a bell in the notification area (`firox-notifications`): it shows how many are new and opens a panel with the last 100 notifications (click one to open its app). **Do Not Disturb** (in the panel, or right-click the bell) holds pop-ups except urgent ones. Pop-ups are also held while a screen saver runs |
 | Volume and brightness keys | `firox-osd`: the volume, mute, microphone-mute and brightness keys show a small level popup at the bottom of the screen (also with Do Not Disturb on, and on the lock screen). Volume up unmutes; brightness never goes fully black |
 | Updates | Updates download in the background and apply at the next restart. When one is waiting, an icon appears in the notification area (`firox-updates`): click it to restart, right-click to see which packages change. You also get a notification once per update, and "Firox Linux was updated" after restarting |
+| Snipping Tool | `firox-snip` (Start → All Programs, or **Super+Shift+S** to go straight to selecting): snip a rectangle, the whole screen or one monitor, with an optional 3/5/10 second delay. Each snip is copied to the clipboard; mark it up with a pen or highlighter, then Copy, Save (to Pictures/Screenshots) or Save As (PNG or JPEG). **Print Screen** still saves the whole screen straight to Pictures, and **Shift+Print Screen** saves an area there |
+| Calendar | Click the clock for the time, date and a month calendar (`firox-calendar`), with a link to Date and Time settings; right-click the clock to open those settings directly |
 | Clipboard | `firox-clipboard` (cliphist): what you copy stays available after the app you copied it from closes (normally it's lost on Wayland), **Super+V** clipboard history with search and images, never stores items password managers mark as sensitive, cleared at logout by default. **Settings → Clipboard** sets the history size or turns it off. The Command Prompt also takes `Ctrl+Insert` / `Shift+Insert`, and Waydroid shares the clipboard with Android (`python3-pyclip`) |
 | Power saving | **Settings → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
 | Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
@@ -69,13 +71,17 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 
 ![Volume and brightness popups, Modern and Classic](docs/screenshots/osd.png)
 
+| Snipping Tool | Calendar (Modern, Classic) |
+|---|---|
+| ![Snipping Tool](docs/screenshots/snipping-tool.png) | ![Calendar](docs/screenshots/calendar.png) |
+
 | Mouse → Touchpad | Keyboard → Layouts |
 |---|---|
 | ![Mouse settings](docs/screenshots/mouse-touchpad.png) | ![Keyboard settings](docs/screenshots/keyboard-layouts.png) |
 
 ### Keyboard shortcuts
 
-`Super` Start menu · `Super+E` Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+V` clipboard history · `Super+←/→` snap · `Alt+Tab` switch windows · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot
+`Super` Start menu · `Super+E` Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+V` clipboard history · `Super+←/→` snap · `Alt+Tab` switch windows · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot · `Super+Shift+S` Snipping Tool
 
 ## Repository layout
 

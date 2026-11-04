@@ -91,6 +91,8 @@
     <!-- Print Screen: save to ~/Pictures, Shift+Print: select a region -->
     <keybind key="Print"><action name="Execute" command="firox-open screenshot" /></keybind>
     <keybind key="S-Print"><action name="Execute" command="firox-open screenshot-region" /></keybind>
+    <!-- Super+Shift+S: Snipping Tool, straight to selecting a rectangle -->
+    <keybind key="W-S-s"><action name="Execute" command="firox-snip --region" /></keybind>
 
     <!-- Media / hardware keys -->
     <!-- Volume and brightness keys, with an on-screen popup (firox-osd).

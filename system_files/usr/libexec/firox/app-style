@@ -81,6 +81,10 @@ def main():
         dark = conf.get("COLOR_SCHEME", "prefer-light") == "prefer-dark"
     gtk_theme = conf.get("GTK_THEME", "adw-gtk3-dark" if dark else "adw-gtk3")
     icons = conf.get("ICON_THEME", "Papirus-Dark" if dark else "Papirus")
+    # Papirus comes in light and dark variants: match the apps, so toolbar
+    # icons stay visible (dark apps need the light-coloured icons)
+    if icons in ("Papirus", "Papirus-Dark") and os.path.isdir("/usr/share/icons/Papirus-Dark"):
+        icons = "Papirus-Dark" if dark else "Papirus"
     cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
 
     # GSettings: libadwaita, Firefox (via the settings portal), GTK3 on Wayland

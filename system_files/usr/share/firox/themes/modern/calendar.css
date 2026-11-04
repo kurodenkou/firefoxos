@@ -1,0 +1,41 @@
+/* Clock popup (firox-calendar), Modern look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    color: #e8e8e8;
+    margin: 0 6px 6px 0;
+    background-color: rgba(36, 36, 36, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+#panel-header { padding: 10px 14px 8px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+#time { color: #f2f2f2; font-size: 26px; font-weight: 300; }
+#date { color: #b0b0b0; font-size: 13px; }
+
+calendar {
+    margin: 8px;
+    padding: 2px;
+    color: #e8e8e8;
+    background-color: transparent;
+    border: none;
+}
+calendar.header { background-image: none; background-color: transparent; border: none; color: #f2f2f2; font-weight: bold; }
+calendar.button { color: #c8c8c8; background: transparent; border: none; }
+calendar.button:hover { color: #ffffff; }
+calendar.highlight { color: #9a9a9a; font-weight: bold; }
+calendar:indeterminate { color: #5c5c5c; }
+calendar:selected { color: #ffffff; background-color: rgba(255, 255, 255, 0.22); border-radius: 4px; }
+
+#panel-footer { padding: 6px 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+#panel-footer button.link {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+}
+#panel-footer button.link label { color: #d0d0d0; }
+#panel-footer button.link:hover { background-color: rgba(255, 255, 255, 0.10); border-radius: 4px; }

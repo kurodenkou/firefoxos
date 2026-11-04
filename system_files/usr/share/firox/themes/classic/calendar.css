@@ -1,0 +1,49 @@
+/* Clock popup (firox-calendar), Classic look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    margin: 0 4px 4px 0;
+    background-color: #ffffff;
+    border: 1px solid #0831d9;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.45);
+}
+#panel-header {
+    border-radius: 7px 7px 0 0;
+    padding: 8px 12px;
+    background-image: linear-gradient(to bottom,
+        #1868ce 0%, #4a8ae8 6%, #1c64d2 14%, #1a5fcf 80%, #1457c4 100%);
+}
+#time { color: #ffffff; font-size: 26px; font-weight: bold; }
+#date { color: #dce6ff; font-size: 13px; }
+
+calendar {
+    margin: 8px;
+    padding: 2px;
+    color: #000000;
+    background-color: #ffffff;
+    border: 1px solid #7f9db9;
+}
+calendar.header { background-image: none; background-color: #d3e5fa; border: none; color: #00136b; font-weight: bold; }
+calendar.button { color: #00136b; background: transparent; border: none; }
+calendar.button:hover { color: #1a5fcf; }
+calendar.highlight { color: #00136b; font-weight: bold; }
+calendar:indeterminate { color: #a0a0a0; }
+calendar:selected { color: #ffffff; background-color: #316ac5; border-radius: 2px; }
+
+#panel-footer {
+    padding: 6px 10px;
+    background-color: #d3e5fa;
+    border-top: 1px solid #95bdee;
+}
+#panel-footer button.link {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    padding: 2px 6px;
+}
+#panel-footer button.link label { color: #0b3cb5; }
+#panel-footer button.link:hover label { text-decoration: underline; }
