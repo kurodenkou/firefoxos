@@ -41,7 +41,7 @@ if [ "${roothome_created}" = 1 ]; then rmdir /var/roothome; fi
 
 # Branding
 sed -i \
-    -e 's/^PRETTY_NAME="\(.*\))"$/PRETTY_NAME="\1, NVIDIA)"/' \
+    -e 's/^PRETTY_NAME="\(.*\)"$/PRETTY_NAME="\1 (NVIDIA)"/' \
     /usr/lib/os-release
 grep -q '^VARIANT_ID=' /usr/lib/os-release && sed -i 's/^VARIANT_ID=.*/VARIANT_ID=nvidia/' /usr/lib/os-release \
     || echo 'VARIANT_ID=nvidia' >> /usr/lib/os-release

@@ -167,12 +167,33 @@ systemctl enable tuned.service tuned-ppd.service
 ### 5. Branding
 ### ---------------------------------------------------------------------------
 
+# The name the boot menu, boot messages and Settings > System show
 sed -i \
     -e 's/^NAME=.*/NAME="Firox Linux"/' \
-    -e 's/^PRETTY_NAME=.*/PRETTY_NAME="Firox Linux (Fedora '"${FEDORA_VERSION}"')"/' \
+    -e 's/^PRETTY_NAME=.*/PRETTY_NAME="Firox Linux '"${FEDORA_VERSION}"'"/' \
+    -e 's/^LOGO=.*/LOGO=firox-logo/' \
     -e 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="firox"/' \
     /usr/lib/os-release
 grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="firox"' >> /usr/lib/os-release
+
+# Boot splash: the Firox logo over Fedora's spinner (theme in
+# system_files/usr/share/plymouth/themes/firox; the spinner frames come from
+# the spinner theme, keeping our watermark.png)
+cp -n /usr/share/plymouth/themes/spinner/*.png /usr/share/plymouth/themes/firox/
+plymouth-set-default-theme firox
+
+# The splash and the name are copied into the initramfs: rebuild it (the
+# NVIDIA variant rebuilds it anyway, after adding its drivers)
+if [ "${FIROX_VARIANT:-main}" != nvidia ]; then
+    KERNEL="$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}\n' | tail -n1)"
+    # /root links to /var/roothome, which only exists on a booted system
+    roothome_created=0
+    if [ ! -e /var/roothome ]; then mkdir -p /var/roothome; roothome_created=1; fi
+    /usr/bin/dracut --no-hostonly --kver "${KERNEL}" --reproducible --add ostree \
+        -f "/usr/lib/modules/${KERNEL}/initramfs.img"
+    chmod 0600 "/usr/lib/modules/${KERNEL}/initramfs.img"
+    if [ "${roothome_created}" = 1 ]; then rmdir /var/roothome; fi
+fi
 
 ### ---------------------------------------------------------------------------
 ### 6. NVIDIA variant (firox-nvidia-open)
