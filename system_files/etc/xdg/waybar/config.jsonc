@@ -114,7 +114,8 @@
     },
     "clock": {
         "format": "{:%I:%M %p}",
-        "tooltip-format": "<big>{:%A, %B %d, %Y}</big>\n<tt><small>{calendar}</small></tt>",
-        "on-click": "firox-control-panel datetime"
+        "tooltip-format": "{:%A, %B %d, %Y}\nClick for the calendar",
+        "on-click": "firox-calendar toggle",
+        "on-click-right": "firox-control-panel datetime"
     }
 }

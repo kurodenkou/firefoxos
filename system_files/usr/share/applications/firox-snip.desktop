@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+Comment=Snip part of the screen, mark it up, copy or save it (Super+Shift+S)
+Exec=firox-snip
+Icon=accessories-screenshot
+Categories=Utility;Graphics;
+Keywords=screenshot;snip;capture;screen;print;
+StartupNotify=false
