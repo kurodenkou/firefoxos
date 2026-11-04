@@ -34,6 +34,7 @@ toggles it. Typing while the menu is open searches All Programs.
 
 import json
 import os
+import subprocess
 import pwd
 import re
 import sys
@@ -423,7 +424,7 @@ class StartMenu(Gtk.Window):
         return sep
 
     def _app_item(self, info, size=32, title=None, subtitle=None, pinned=False):
-        return self._item(
+        btn = self._item(
             info.get_icon() or "application-x-executable",
             title or info.get_display_name(),
             subtitle,
@@ -431,6 +432,31 @@ class StartMenu(Gtk.Window):
             pinned=pinned,
             on_click=lambda: self.launch(info),
         )
+        btn.connect("button-press-event", self._on_app_press, info)
+        return btn
+
+    def _on_app_press(self, btn, event, info):
+        """Right-click a program: Open, or pin it to Quick Launch."""
+        if event.type != Gdk.EventType.BUTTON_PRESS or event.button != 3:
+            return False
+        ident = info.get_id() or ""
+        menu = Gtk.Menu()
+        item = Gtk.MenuItem.new_with_mnemonic("_Open")
+        item.connect("activate", lambda _i: self.launch(info))
+        menu.append(item)
+        if ident:
+            menu.append(Gtk.SeparatorMenuItem())
+            pinned = subprocess.run(["firox-quicklaunch", "has", ident]).returncode == 0
+            item = Gtk.MenuItem.new_with_mnemonic(
+                "Unpin from _Quick Launch" if pinned else "Pin to _Quick Launch")
+            item.connect("activate", lambda _i: subprocess.run(
+                ["firox-quicklaunch", "remove" if pinned else "add", ident]))
+            menu.append(item)
+        menu.show_all()
+        menu.attach_to_widget(btn, None)
+        self._ctx_menu = menu          # keep it alive while open
+        menu.popup_at_pointer(event)
+        return True
 
     def _fill_left(self):
         for child in self.left.get_children():

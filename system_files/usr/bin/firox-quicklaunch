@@ -1,0 +1,86 @@
+#!/usr/bin/python3
+"""
+firox-quicklaunch: the programs pinned to Quick Launch (next to the start
+button).
+
+    firox-quicklaunch                 list them
+    firox-quicklaunch add ID [POS]    pin a program (its .desktop file id,
+                                      e.g. org.gnome.Calculator.desktop)
+    firox-quicklaunch remove ID       unpin it
+    firox-quicklaunch move ID POS     put it at position POS (0 = first)
+    firox-quicklaunch has ID          exit 0 if it's pinned
+    firox-quicklaunch reset           back to the defaults
+
+Besides programs there are two built-in entries: firox:show-desktop and
+firox:computer. The list lives in ~/.config/firox/quicklaunch, one entry per
+line; the taskbar picks up changes straight away. You can also pin a program
+by right-clicking it in the Start menu or on the taskbar.
+"""
+
+import os
+import sys
+
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "firox")
+PATH = os.path.join(CONFIG, "quicklaunch")
+DEFAULTS = ["firox:show-desktop", "org.mozilla.firefox.desktop", "firox:computer"]
+
+
+def load():
+    try:
+        with open(PATH) as fh:
+            return [l.strip() for l in fh if l.strip() and not l.lstrip().startswith("#")]
+    except OSError:
+        return list(DEFAULTS)
+
+
+def save(items):
+    os.makedirs(CONFIG, exist_ok=True)
+    tmp = PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("# Quick Launch (firox-quicklaunch): .desktop ids, firox:show-desktop, firox:computer\n")
+        for i in items:
+            fh.write(i + "\n")
+    os.replace(tmp, PATH)
+
+
+def norm(ident):
+    ident = os.path.basename(ident)
+    if not ident.startswith("firox:") and not ident.endswith(".desktop"):
+        ident += ".desktop"
+    return ident
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "list"
+    items = load()
+    if cmd == "list":
+        print("\n".join(items))
+    elif cmd in ("add", "remove", "move", "has") and len(argv) > 2:
+        ident = norm(argv[2])
+        if cmd == "has":
+            return 0 if ident in items else 1
+        if ident in items:
+            items.remove(ident)
+        if cmd in ("add", "move"):
+            pos = len(items)
+            if len(argv) > 3:
+                try:
+                    pos = max(0, min(len(items), int(argv[3])))
+                except ValueError:
+                    print(f"firox-quicklaunch: bad position {argv[3]}", file=sys.stderr)
+                    return 2
+            items.insert(pos, ident)
+        save(items)
+    elif cmd == "reset":
+        try:
+            os.remove(PATH)
+        except OSError:
+            pass
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

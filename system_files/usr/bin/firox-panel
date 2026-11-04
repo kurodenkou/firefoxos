@@ -10,8 +10,9 @@ One bar along the bottom of every monitor:
 
 Window buttons are grouped: when an app has two or more windows open they
 share one button ("3  Firefox ▴"); click it to pick a window. Right-click a
-button for Restore / Minimize / Maximize / Close, or Minimize/Close group.
-Right-click an empty part of the taskbar to turn grouping off.
+button for Restore / Minimize / Maximize / Close, Minimize/Close group, or Pin
+to Quick Launch. Drag buttons and Quick Launch icons to rearrange them.
+Right-click an empty part of the taskbar for its settings.
 
 The notification area holds app icons (StatusNotifierItem, e.g. network and
 Bluetooth), keep the screen on, volume, battery, a waiting update, the
@@ -19,7 +20,10 @@ notification bell and the clock.
 
 Styled by the theme's panel.css (/usr/share/firox/themes/NAME/panel.css),
 reloaded when the theme changes; add your own rules in
-~/.config/firox/panel.css. Settings: ~/.config/firox/panel.conf (GROUP=1|0).
+~/.config/firox/panel.css. Settings (Settings > Taskbar, applied straight
+away): ~/.config/firox/panel.conf with GROUP, AUTOHIDE, QUICKLAUNCH and
+SECONDS (1 or 0). Quick Launch: ~/.config/firox/quicklaunch (see
+firox-quicklaunch).
 
 Exits with status 3 if it can't run here (no layer-shell or window list
 support, or a missing library); the session then starts waybar instead.
@@ -74,12 +78,14 @@ FA_BATTERY = ("", "", "", "", "")
 FA_CHARGING = ""
 FA_BELL, FA_BELL_OFF = "", ""
 
-QUICK_LAUNCH = [
-    # (icon, command, tooltip)
-    ("show-desktop", ["firox-open", "show-desktop"], "Show the desktop"),
-    ("firefox", ["firefox"], "Firefox"),
-    ("system-file-manager", ["firox-open", "computer"], "Computer"),
-]
+QUICK_LAUNCH = os.path.join(CONFIG, "quicklaunch")
+QL_DEFAULTS = ["firox:show-desktop", "org.mozilla.firefox.desktop", "firox:computer"]
+QL_BUILTIN = {
+    # id: (icon, command, tooltip)
+    "firox:show-desktop": ("show-desktop", ["firox-open", "show-desktop"], "Show the desktop"),
+    "firox:computer": ("system-file-manager", ["firox-open", "computer"], "Computer"),
+}
+SETTING_DEFAULTS = {"GROUP": "1", "AUTOHIDE": "0", "QUICKLAUNCH": "1", "SECONDS": "0"}
 
 
 # ------------------------------------------------------- pywayland patch --
@@ -161,7 +167,7 @@ def theme_css():
 
 
 def load_settings():
-    out = {"GROUP": "1"}
+    out = dict(SETTING_DEFAULTS)
     for line in read(SETTINGS).splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             k, v = line.split("=", 1)
@@ -177,6 +183,114 @@ def save_setting(key, value):
         fh.write("# firox-panel settings\n")
         for k, v in s.items():
             fh.write(f"{k}={v}\n")
+
+
+def setting(key):
+    return load_settings().get(key, SETTING_DEFAULTS.get(key, "0")) != "0"
+
+
+def ql_load():
+    try:
+        with open(QUICK_LAUNCH) as fh:
+            return [l.strip() for l in fh if l.strip() and not l.lstrip().startswith("#")]
+    except OSError:
+        return list(QL_DEFAULTS)
+
+
+def ql_save(items):
+    os.makedirs(CONFIG, exist_ok=True)
+    tmp = QUICK_LAUNCH + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("# Quick Launch (firox-quicklaunch): .desktop ids, firox:show-desktop, firox:computer\n")
+        for i in items:
+            fh.write(i + "\n")
+    os.replace(tmp, QUICK_LAUNCH)
+
+
+def ql_pin(ident, pin=True):
+    items = [i for i in ql_load() if i != ident]
+    if pin:
+        items.append(ident)
+    ql_save(items)
+
+
+def desktop_info(ident):
+    try:
+        return Gio.DesktopAppInfo.new(ident)
+    except TypeError:
+        return None
+
+
+def launch(info):
+    try:
+        ctx = Gdk.Display.get_default().get_app_launch_context()
+        info.launch([], ctx)
+    except GLib.Error as err:
+        print(f"firox-panel: can't start {info.get_id()}: {err.message}", file=sys.stderr)
+
+
+class Reorder:
+    """Drag buttons along a Gtk.Box to rearrange them (press, move, let go).
+    `done(children)` gets the new order; a drag doesn't count as a click."""
+
+    THRESHOLD = 8
+
+    def __init__(self, box, done):
+        self.box = box
+        self.done = done
+        self.btn = None
+        self.start = 0
+        self.dragging = False
+
+    def attach(self, btn):
+        btn.add_events(Gdk.EventMask.BUTTON1_MOTION_MASK)
+        btn.connect("button-press-event", self.on_press)
+        btn.connect("motion-notify-event", self.on_motion)
+        btn.connect("button-release-event", self.on_release)
+
+    def on_press(self, btn, event):
+        if event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
+            self.btn, self.dragging = btn, False
+            self.start = btn.translate_coordinates(self.box, int(event.x), int(event.y))[0]
+        return False
+
+    def on_motion(self, btn, event):
+        if btn is not self.btn:
+            return False
+        x = btn.translate_coordinates(self.box, int(event.x), int(event.y))[0]
+        if not self.dragging and abs(x - self.start) < self.THRESHOLD:
+            return False
+        if not self.dragging:
+            self.dragging = True
+            btn.get_style_context().add_class("dragging")
+        kids = [c for c in self.box.get_children() if c.get_visible()]
+        target = len(kids) - 1
+        for i, c in enumerate(kids):
+            cx = c.translate_coordinates(self.box, 0, 0)[0]
+            if x < cx + c.get_allocated_width() // 2:
+                target = i
+                break
+        if kids.index(btn) != target:
+            self.box.reorder_child(btn, target)
+        return True
+
+    def on_release(self, btn, event):
+        if btn is not self.btn or event.button != 1:
+            return False
+        self.btn = None
+        if self.dragging:
+            self.dragging = False
+            btn.get_style_context().remove_class("dragging")
+            btn.firox_dragged = True      # swallow the "clicked" that follows
+            self.done([c for c in self.box.get_children()])
+        return False
+
+
+def was_dragged(btn):
+    if getattr(btn, "firox_dragged", False):
+        btn.firox_dragged = False
+        return True
+    return False
 
 
 def popup_menu(menu, widget, event):
@@ -540,6 +654,8 @@ class TaskButton(Gtk.Button):
 
     # clicks
     def on_click(self, _b):
+        if was_dragged(self):
+            return
         tl = self.panel.toplevels
         if self.group:
             menu = Gtk.Menu()
@@ -574,6 +690,7 @@ class TaskButton(Gtk.Button):
             menu.append(menu_item("Mi_nimize group", lambda: [tl.minimize(w) for w in ws] and None,
                                   sensitive=not all(w.minimized for w in ws)))
             menu.append(Gtk.SeparatorMenuItem())
+            self.pin_item(menu)
             menu.append(menu_item(f"_Close group ({len(ws)} windows)",
                                   lambda: [tl.close(w) for w in ws] and None))
         else:
@@ -582,10 +699,23 @@ class TaskButton(Gtk.Button):
             menu.append(menu_item("Mi_nimize", lambda: tl.minimize(w), sensitive=not w.minimized))
             menu.append(menu_item("Ma_ximize", lambda: tl.maximize(w), sensitive=not w.maximized))
             menu.append(Gtk.SeparatorMenuItem())
+            self.pin_item(menu)
             menu.append(menu_item("_Close", lambda: tl.close(w)))
         self.panel.keep(menu)
         popup_menu(menu, self, event)
         return True
+
+    def pin_item(self, menu):
+        """Pin/Unpin to Quick Launch, for apps with a Start menu entry."""
+        info = APPS.find(self.windows[0].app_id)
+        if info is None or not info.get_id():
+            return
+        ident = info.get_id()
+        if ident in ql_load():
+            menu.append(menu_item("Unpin from _Quick Launch", lambda: ql_pin(ident, False)))
+        else:
+            menu.append(menu_item("Pin to _Quick Launch", lambda: ql_pin(ident)))
+        menu.append(Gtk.SeparatorMenuItem())
 
 
 class Taskbar(Gtk.Box):
@@ -597,9 +727,14 @@ class Taskbar(Gtk.Box):
         self.panel = panel
         self.bar = bar
         self.buttons = {}
+        self.order = []          # keys, as you've arranged them (this session)
         self.width = 0
         self.per = 0
+        self.reorder = Reorder(self, self.on_reordered)
         self.connect("size-allocate", self.on_allocate)
+
+    def on_reordered(self, children):
+        self.order = [c.key for c in children if isinstance(c, TaskButton)]
 
     def on_allocate(self, _w, alloc):
         if alloc.width != self.width:
@@ -631,11 +766,16 @@ class Taskbar(Gtk.Box):
         for key in list(self.buttons):
             if key not in keys:
                 self.buttons.pop(key).destroy()
+        # Your arrangement first; new buttons go on the end
+        self.order = [k for k in self.order if k in keys] + [k for k, _ws in wanted if k not in self.order]
+        rank = {k: i for i, k in enumerate(self.order)}
+        wanted.sort(key=lambda kw: rank[kw[0]])
         for pos, (key, ws) in enumerate(wanted):
             btn = self.buttons.get(key)
             if btn is None:
                 btn = TaskButton(self.panel, key)
                 self.buttons[key] = btn
+                self.reorder.attach(btn)
                 self.pack_start(btn, False, False, 0)
             btn.update(ws)
             self.reorder_child(btn, pos)
@@ -1222,7 +1362,8 @@ class Battery(Indicator):
             tip = f"{pct}% remaining" + (f" ({left})" if left else "")
         cls = ["critical"] if pct <= 10 and not plugged else ["warning"] if pct <= 20 and not plugged else []
         glyph = FA_CHARGING if charging else FA_BATTERY[min(4, pct * 5 // 101)]
-        self.set(glyph, tip + "\nClick for Power Options", cls + (["charging"] if charging else []), True)
+        self.set(glyph, tip + "\nClick for battery, brightness and power mode",
+                 cls + (["charging"] if charging else []), True)
 
     def time_left(self, bats, charging):
         now = full = rate = 0
@@ -1243,6 +1384,9 @@ class Battery(Indicator):
         return f"{h} h {m:02d} min" if h else f"{m} min"
 
     def left(self):
+        spawn(["firox-battery", "toggle"])
+
+    def right(self):
         spawn(["firox-control-panel", "power"])
 
 
@@ -1301,16 +1445,29 @@ class Bell(Indicator):
 
 
 class Clock(Indicator):
-    def __init__(self):
+    def __init__(self, seconds=False):
         super().__init__("clock")
+        self.seconds = seconds
+        self.timer = None
         self.tick()
+
+    def set_seconds(self, on):
+        if on != self.seconds:
+            self.seconds = on
+            if self.timer is not None:
+                GLib.source_remove(self.timer)
+            self.tick()
 
     def tick(self):
         now = time.localtime()
-        self.set(time.strftime("%I:%M %p", now).lstrip("0"),
+        fmt = "%I:%M:%S %p" if self.seconds else "%I:%M %p"
+        self.set(time.strftime(fmt, now).lstrip("0"),
                  time.strftime("%A, ", now) + time.strftime("%B ", now) + str(now.tm_mday)
                  + time.strftime(", %Y", now) + "\nClick for the calendar")
-        GLib.timeout_add_seconds(60 - now.tm_sec, self.tick)
+        if self.seconds:
+            self.timer = GLib.timeout_add(1000 - int(time.time() * 1000) % 1000 + 5, self.tick)
+        else:
+            self.timer = GLib.timeout_add_seconds(60 - now.tm_sec, self.tick)
         return False
 
     def left(self):
@@ -1341,10 +1498,17 @@ class Bar(Gtk.Window):
 
         catcher = Gtk.EventBox()          # right-click on an empty part
         catcher.connect("button-press-event", self.on_empty_press)
+        catcher.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        catcher.connect("enter-notify-event", self.on_enter)
+        catcher.connect("leave-notify-event", self.on_leave)
         self.add(catcher)
         row = Gtk.Box()
         row.set_name("row")
+        self.row = row
         catcher.add(row)
+        self.autohide = False
+        self.hidden = False
+        self.hide_timer = None
 
         start = Gtk.Button(label="firox")
         start.set_name("custom-start")
@@ -1354,21 +1518,16 @@ class Bar(Gtk.Window):
         start.connect("clicked", lambda _b: spawn(["firox-startmenu"]))
         row.pack_start(start, False, False, 0)
 
-        ql = Gtk.Box(spacing=0)
-        ql.set_name("quick-launch")
-        for icon, cmd, tip in QUICK_LAUNCH:
-            b = Gtk.Button()
-            b.get_style_context().add_class("quick-launch")
-            b.set_relief(Gtk.ReliefStyle.NONE)
-            b.set_focus_on_click(False)
-            b.set_tooltip_text(tip)
-            b.add(self.ql_icon(icon))
-            b.connect("clicked", lambda _b, c=cmd: spawn(c))
-            ql.pack_start(b, False, False, 0)
-        row.pack_start(ql, False, False, 0)
-        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        sep.set_name("custom-ql-sep")
-        row.pack_start(sep, False, False, 0)
+        self.ql = Gtk.Box(spacing=0)
+        self.ql.set_name("quick-launch")
+        self.ql.set_no_show_all(True)
+        self.ql_reorder = Reorder(self.ql, self.on_ql_reordered)
+        row.pack_start(self.ql, False, False, 0)
+        self.ql_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        self.ql_sep.set_name("custom-ql-sep")
+        self.ql_sep.set_no_show_all(True)
+        row.pack_start(self.ql_sep, False, False, 0)
+        self.fill_ql()
 
         self.taskbar = Taskbar(panel, self)
         row.pack_start(self.taskbar, True, True, 0)
@@ -1384,6 +1543,119 @@ class Bar(Gtk.Window):
         self.show_all()
         for ind in panel.indicators:
             ind.set()
+        self.apply_settings()
+
+    # ---- Quick Launch
+    def fill_ql(self):
+        for child in self.ql.get_children():
+            child.destroy()
+        for ident in ql_load():
+            if ident in QL_BUILTIN:
+                icon, cmd, tip = QL_BUILTIN[ident]
+                image, run = self.ql_icon(icon), (lambda c=cmd: spawn(c))
+            else:
+                info = desktop_info(ident)
+                if info is None:
+                    continue                  # uninstalled since it was pinned
+                tip = info.get_display_name()
+                image = Gtk.Image.new_from_gicon(info.get_icon() or Gio.ThemedIcon.new("application-x-executable"),
+                                                 Gtk.IconSize.MENU)
+                image.set_pixel_size(18)
+                run = (lambda i=info: launch(i))
+            b = Gtk.Button()
+            b.firox_id = ident
+            b.get_style_context().add_class("quick-launch")
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_focus_on_click(False)
+            b.set_tooltip_text(tip)
+            b.add(image)
+            b.connect("clicked", lambda btn, r=run: None if was_dragged(btn) else r())
+            b.connect("button-press-event", self.on_ql_press, run)
+            self.ql_reorder.attach(b)
+            self.ql.pack_start(b, False, False, 0)
+            b.show_all()
+        self.show_ql()
+
+    def show_ql(self):
+        on = self.panel.settings.get("QUICKLAUNCH", "1") != "0" and bool(self.ql.get_children())
+        self.ql.set_visible(on)
+        self.ql_sep.set_visible(on)
+
+    def on_ql_press(self, btn, event, run):
+        if event.type != Gdk.EventType.BUTTON_PRESS or event.button != 3:
+            return False
+        menu = Gtk.Menu()
+        menu.append(menu_item("_Open", run))
+        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(menu_item("_Remove from Quick Launch", lambda: ql_pin(btn.firox_id, False)))
+        self.panel.keep(menu)
+        popup_menu(menu, btn, event)
+        return True
+
+    def on_ql_reordered(self, children):
+        ql_save([c.firox_id for c in children])
+
+    # ---- settings
+    def apply_settings(self):
+        st = self.panel.settings
+        self.show_ql()
+        autohide = st.get("AUTOHIDE", "0") != "0"
+        if autohide != self.autohide:
+            self.autohide = autohide
+            if autohide:
+                GtkLayerShell.set_exclusive_zone(self, 0)   # windows use the whole screen
+                self.schedule_hide(1500)
+            else:
+                GtkLayerShell.auto_exclusive_zone_enable(self)
+                self.reveal()
+
+    # ---- auto-hide: a thin strip until the pointer touches the bottom edge
+    def reveal(self):
+        if self.hide_timer is not None:
+            GLib.source_remove(self.hide_timer)
+            self.hide_timer = None
+        if self.hidden:
+            self.hidden = False
+            self.get_style_context().remove_class("hidden")
+            self.set_size_request(-1, HEIGHT)
+            self.row.show()
+
+    def schedule_hide(self, delay=700):
+        if self.hide_timer is not None:
+            GLib.source_remove(self.hide_timer)
+        self.hide_timer = GLib.timeout_add(delay, self.try_hide)
+
+    def try_hide(self):
+        self.hide_timer = None
+        if not self.autohide or self.hidden:
+            return False
+        if self.panel.menus or self.pointer_inside():
+            self.schedule_hide()            # a menu is open, or you're still here
+            return False
+        self.hidden = True
+        self.get_style_context().add_class("hidden")
+        self.row.hide()
+        self.set_size_request(-1, 2)
+        self.resize(1, 2)
+        return False
+
+    def pointer_inside(self):
+        seat = Gdk.Display.get_default().get_default_seat()
+        pointer = seat.get_pointer() if seat else None
+        if pointer is None:
+            return False
+        win, _x, _y = pointer.get_window_at_position()
+        return win is not None and win.get_toplevel() == self.get_window()
+
+    def on_enter(self, _w, _event):
+        if self.autohide:
+            self.reveal()
+        return False
+
+    def on_leave(self, _w, event):
+        if self.autohide and event.detail != Gdk.NotifyType.INFERIOR:
+            self.schedule_hide()
+        return False
 
     @staticmethod
     def ql_icon(name):
@@ -1409,7 +1681,8 @@ class Bar(Gtk.Window):
         menu.append(Gtk.SeparatorMenuItem())
         menu.append(menu_item("_Show the desktop", lambda: spawn(["firox-open", "show-desktop"])))
         menu.append(menu_item("Task _Manager", lambda: spawn(["firox-open", "task-manager"])))
-        menu.append(menu_item("Se_ttings", lambda: spawn(["firox-control-panel"])))
+        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(menu_item("Taskbar _settings…", lambda: spawn(["firox-control-panel", "taskbar"])))
         p.keep(menu)
         menu.show_all()
         menu.popup_at_pointer(event)
@@ -1440,12 +1713,14 @@ class Panel:
         APPS = Apps()
         self.menus = []
         self.bars = {}
-        self.grouping = load_settings().get("GROUP", "1") != "0"
+        self.settings = load_settings()
+        self.grouping = self.settings.get("GROUP", "1") != "0"
         if not GtkLayerShell.is_supported():
             cant_run("the compositor doesn't support layer-shell")
         self.toplevels = Toplevels(self.refresh)
         self.tray = Tray(self)
-        self.indicators = [Awake(), Volume(), Battery(), Updates(), Bell(), Clock()]
+        self.clock = Clock(self.settings.get("SECONDS", "0") != "0")
+        self.indicators = [Awake(), Volume(), Battery(), Updates(), Bell(), self.clock]
 
         self.provider = Gtk.CssProvider()
         self.user_provider = Gtk.CssProvider()
@@ -1485,10 +1760,17 @@ class Panel:
         if name in ("theme", "panel.css"):
             self.load_css()
         elif name == "panel.conf":
-            grouping = load_settings().get("GROUP", "1") != "0"
+            self.settings = load_settings()
+            grouping = self.settings.get("GROUP", "1") != "0"
             if grouping != self.grouping:
                 self.grouping = grouping
                 self.refresh()
+            self.clock.set_seconds(self.settings.get("SECONDS", "0") != "0")
+            for bar in self.bars.values():
+                bar.apply_settings()
+        elif name == "quicklaunch":
+            for bar in self.bars.values():
+                bar.fill_ql()
 
     def add_bar(self, monitor):
         if monitor not in self.bars:
@@ -1512,6 +1794,11 @@ class Panel:
         save_setting("GROUP", "1" if on else "0")
         self.refresh()
 
+    def menu_closed(self):
+        for bar in self.bars.values():
+            if bar.autohide:
+                bar.schedule_hide()
+
     def keep(self, menu):
         """Hold a reference to an open menu until it closes."""
         self.menus.append(menu)
@@ -1521,6 +1808,7 @@ class Panel:
         if menu in self.menus:
             self.menus.remove(menu)
         menu.destroy()
+        self.menu_closed()
         return False
 
 

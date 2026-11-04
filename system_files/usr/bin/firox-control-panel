@@ -14,6 +14,8 @@ settings applets.
     firox-control-panel mouse      open Mouse (and touchpad) directly
     firox-control-panel keyboard   open Keyboard directly
     firox-control-panel accounts   open User Accounts directly
+    firox-control-panel taskbar    open Taskbar directly
+    firox-control-panel defaults   open Default Programs directly
 """
 
 import json
@@ -41,6 +43,9 @@ APPLETS = [
     ("input-mouse", "Mouse", "Pointer speed, buttons, scrolling and touchpad", ["@mouse"]),
     ("input-keyboard", "Keyboard", "Layouts, repeat speed and Num Lock", ["@keyboard"]),
     ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
+    ("preferences-desktop", "Taskbar", "Auto-hide, Quick Launch, grouping and the clock", ["@taskbar"]),
+    ("preferences-desktop-default-applications", "Default Programs",
+     "Web browser, email, music, pictures and more", ["@defaults"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
      ["pcmanfm-qt", "--profile=firox", "--desktop-pref=background"]),
     ("multimedia-volume-control", "Sounds and Audio Devices", "Speakers, microphones and volume", ["pavucontrol"]),
@@ -751,6 +756,184 @@ class ClipboardDialog(Gtk.Dialog):
             subprocess.run(["firox-clipboard", "set"] + changed)
 
 
+PANEL_CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                          "firox", "panel.conf")
+
+
+def read_panel_conf():
+    out = {"GROUP": "1", "AUTOHIDE": "0", "QUICKLAUNCH": "1", "SECONDS": "0"}
+    try:
+        with open(PANEL_CONF) as fh:
+            for line in fh:
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.strip().split("=", 1)
+                    out[k] = v
+    except OSError:
+        pass
+    return out
+
+
+class TaskbarDialog(Gtk.Dialog):
+    """Taskbar settings (firox-panel picks changes up straight away)."""
+
+    OPTIONS = [
+        ("AUTOHIDE", "Auto-hide the taskbar",
+         "It slides away when you're not using it; touch the bottom of the screen to bring it back."),
+        ("GROUP", "Group similar windows",
+         "Windows of the same program share one button that shows how many there are."),
+        ("QUICKLAUNCH", "Show Quick Launch",
+         "The small icons next to the start button. Right-click a program in the Start menu "
+         "or on the taskbar to pin it there; drag them to rearrange."),
+        ("SECONDS", "Show seconds on the clock", None),
+    ]
+
+    def __init__(self, parent):
+        super().__init__(title="Taskbar", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(440, -1)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("preferences-desktop", Gtk.IconSize.DIALOG),
+                          False, False, 0)
+        intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=46,
+                          label="Drag window buttons to rearrange them. Right-click an empty part of "
+                                "the taskbar to come back here.")
+        header.pack_start(intro, True, True, 0)
+        box.pack_start(header, False, False, 0)
+        self.values = read_panel_conf()
+        self.checks = {}
+        for key, title, help_text in self.OPTIONS:
+            cb = Gtk.CheckButton(label=title)
+            cb.set_active(self.values.get(key, "0") != "0")
+            box.pack_start(cb, False, False, 0)
+            if help_text:
+                lab = Gtk.Label(label=help_text, xalign=0, wrap=True, max_width_chars=46)
+                lab.set_margin_start(26)
+                lab.get_style_context().add_class("dim-label")
+                box.pack_start(lab, False, False, 0)
+            self.checks[key] = cb
+        reset = Gtk.Button(label="Reset Quick Launch to the defaults")
+        reset.set_halign(Gtk.Align.START)
+        reset.connect("clicked", self.on_reset)
+        box.pack_start(reset, False, False, 4)
+        self.show_all()
+
+    def on_reset(self, btn):
+        subprocess.run(["firox-quicklaunch", "reset"])
+        btn.set_label("Quick Launch was reset")
+        btn.set_sensitive(False)
+
+    def apply(self):
+        for key, cb in self.checks.items():
+            self.values[key] = "1" if cb.get_active() else "0"
+        os.makedirs(os.path.dirname(PANEL_CONF), exist_ok=True)
+        tmp = PANEL_CONF + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write("# firox-panel settings\n")
+            for k, v in self.values.items():
+                fh.write(f"{k}={v}\n")
+        os.replace(tmp, PANEL_CONF)
+
+
+class DefaultsDialog(Gtk.Dialog):
+    """Which program opens web links, email, music, pictures..."""
+
+    KINDS = [
+        ("web-browser", "Web browser",
+         ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"]),
+        ("internet-mail", "Email", ["x-scheme-handler/mailto"]),
+        ("system-file-manager", "Files and folders", ["inode/directory"]),
+        ("audio-x-generic", "Music",
+         ["audio/mpeg", "audio/flac", "audio/ogg", "audio/x-vorbis+ogg", "audio/mp4", "audio/x-wav"]),
+        ("video-x-generic", "Videos",
+         ["video/mp4", "video/x-matroska", "video/webm", "video/quicktime", "video/x-msvideo"]),
+        ("image-x-generic", "Pictures",
+         ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/tiff"]),
+        ("text-x-generic", "Text files", ["text/plain"]),
+        ("application-pdf", "PDF documents", ["application/pdf"]),
+    ]
+
+    def __init__(self, parent):
+        super().__init__(title="Default Programs", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(520, -1)
+        box = self.get_content_area()
+        box.set_spacing(12)
+        box.set_border_width(16)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("preferences-desktop-default-applications",
+                                                       Gtk.IconSize.DIALOG), False, False, 0)
+        header.pack_start(Gtk.Label(label="Choose the program that opens each kind of file or link.",
+                                    xalign=0, wrap=True, max_width_chars=50), True, True, 0)
+        box.pack_start(header, False, False, 0)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        box.pack_start(grid, False, False, 0)
+        self.rows = []
+        theme = Gtk.IconTheme.get_default()
+        for r, (icon, title, mimes) in enumerate(self.KINDS):
+            img = Gtk.Image.new_from_icon_name(icon if theme.has_icon(icon) else "application-x-executable",
+                                               Gtk.IconSize.LARGE_TOOLBAR)
+            grid.attach(img, 0, r, 1, 1)
+            grid.attach(Gtk.Label(label=title, xalign=0), 1, r, 1, 1)
+            combo, current = self.combo_for(mimes)
+            combo.set_hexpand(True)
+            grid.attach(combo, 2, r, 1, 1)
+            self.rows.append((mimes, combo, current))
+        self.show_all()
+
+    @staticmethod
+    def combo_for(mimes):
+        apps, seen = [], set()
+        for mime in mimes:
+            for app in Gio.AppInfo.get_all_for_type(mime):
+                if app.get_id() and app.get_id() not in seen and app.should_show():
+                    seen.add(app.get_id())
+                    apps.append(app)
+        apps.sort(key=lambda a: a.get_display_name().lower())
+        store = Gtk.ListStore(Gio.Icon, str, str)
+        for app in apps:
+            store.append([app.get_icon() or Gio.ThemedIcon.new("application-x-executable"),
+                          app.get_display_name(), app.get_id()])
+        combo = Gtk.ComboBox.new_with_model(store)
+        pix = Gtk.CellRendererPixbuf()
+        combo.pack_start(pix, False)
+        combo.add_attribute(pix, "gicon", 0)
+        text = Gtk.CellRendererText()
+        combo.pack_start(text, True)
+        combo.add_attribute(text, "text", 1)
+        combo.set_id_column(2)
+        default = Gio.AppInfo.get_default_for_type(mimes[0], False)
+        current = default.get_id() if default else None
+        if current and current in seen:
+            combo.set_active_id(current)
+        if not apps:
+            store.append([Gio.ThemedIcon.new("dialog-information"), "No program installed for this", ""])
+            combo.set_active(0)
+            combo.set_sensitive(False)
+        return combo, current
+
+    def apply(self):
+        for mimes, combo, current in self.rows:
+            ident = combo.get_active_id()
+            if not ident or ident == current:
+                continue
+            try:
+                app = Gio.DesktopAppInfo.new(ident)
+            except TypeError:
+                app = None
+            if app is None:
+                continue
+            for mime in mimes:
+                try:
+                    app.set_as_default_for_type(mime)
+                except GLib.Error as err:
+                    print(f"default programs: {mime}: {err.message}", file=sys.stderr)
+
+
 def can_hibernate():
     out = run_text(["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1",
                     "org.freedesktop.login1.Manager", "CanHibernate"])
@@ -1109,6 +1292,11 @@ class ControlPanel(Gtk.ApplicationWindow):
             if dlg.run() == Gtk.ResponseType.APPLY:
                 dlg.apply()
             dlg.destroy()
+        elif argv in (["@taskbar"], ["@defaults"]):
+            dlg = (TaskbarDialog if argv == ["@taskbar"] else DefaultsDialog)(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@clipboard"]:
             dlg = ClipboardDialog(self)
             if dlg.run() == Gtk.ResponseType.APPLY:
@@ -1150,6 +1338,7 @@ class App(Gtk.Application):
                   "accounts": ["@accounts"], "power": ["@power"],
                   "screensaver": ["@screensaver"], "clipboard": ["@clipboard"],
                   "mouse": ["@mouse"], "keyboard": ["@keyboard"],
+                  "taskbar": ["@taskbar"], "defaults": ["@defaults"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
@@ -1158,7 +1347,8 @@ class App(Gtk.Application):
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
                        "appearance": AppearanceDialog, "accounts": AccountsDialog,
                        "power": PowerDialog, "screensaver": ScreenSaverDialog,
-                       "clipboard": ClipboardDialog,
+                       "clipboard": ClipboardDialog, "taskbar": TaskbarDialog,
+                       "defaults": DefaultsDialog,
                        "mouse": MouseDialog, "keyboard": KeyboardDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
