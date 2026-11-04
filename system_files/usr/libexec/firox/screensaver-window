@@ -1,0 +1,101 @@
+#!/usr/bin/python3
+"""
+Run a terminal screen saver full screen on every monitor (firox-screensaver).
+
+    screensaver-window COMMAND
+
+One black, borderless overlay per monitor (gtk-layer-shell), each with an
+embedded terminal (VTE) running COMMAND. Exits when the screen saver is
+stopped (firox-screensaver stop kills it) or when every copy of COMMAND has
+exited. Monitors plugged in or removed while it runs are followed.
+"""
+
+import os
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("Vte", "2.91")
+gi.require_version("GtkLayerShell", "0.1")
+from gi.repository import Gdk, GLib, Gtk, GtkLayerShell, Pango, Vte  # noqa: E402
+
+BLACK = Gdk.RGBA(0, 0, 0, 1)
+GREY = Gdk.RGBA(0.75, 0.75, 0.75, 1)
+
+
+def palette():
+    # The usual 16 terminal colours, with colour 0 forced to pure black
+    hexes = ["000000", "cd0000", "00cd00", "cdcd00", "0000ee", "cd00cd", "00cdcd", "e5e5e5",
+             "7f7f7f", "ff0000", "00ff00", "ffff00", "5c5cff", "ff00ff", "00ffff", "ffffff"]
+    out = []
+    for h in hexes:
+        c = Gdk.RGBA()
+        c.parse("#" + h)
+        out.append(c)
+    return out
+
+
+class Saver:
+    def __init__(self, command):
+        self.command = command
+        self.windows = {}
+        display = Gdk.Display.get_default()
+        display.connect("monitor-added", lambda _d, m: self.add(m))
+        display.connect("monitor-removed", lambda _d, m: self.remove(m))
+        for i in range(display.get_n_monitors()):
+            self.add(display.get_monitor(i))
+        if not self.windows:
+            sys.exit(1)
+
+    def add(self, monitor):
+        win = Gtk.Window()
+        win.override_background_color(Gtk.StateFlags.NORMAL, BLACK)
+        GtkLayerShell.init_for_window(win)
+        GtkLayerShell.set_namespace(win, "firox-screensaver")
+        GtkLayerShell.set_layer(win, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_monitor(win, monitor)
+        for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                     GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+            GtkLayerShell.set_anchor(win, edge, True)
+        GtkLayerShell.set_exclusive_zone(win, -1)           # cover the taskbar too
+        GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.NONE)
+
+        term = Vte.Terminal()
+        term.set_colors(GREY, BLACK, palette())
+        term.set_font(Pango.FontDescription("monospace 11"))
+        term.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
+        term.set_mouse_autohide(True)
+        term.set_scrollback_lines(0)
+        term.connect("child-exited", lambda *_: self.child_exited(monitor))
+        win.add(term)
+        win.connect("realize", lambda w: w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "none")))
+        win.show_all()
+        term.spawn_async(Vte.PtyFlags.DEFAULT, os.path.expanduser("~"),
+                         ["/bin/sh", "-c", self.command], None, GLib.SpawnFlags.DEFAULT,
+                         None, None, -1, None, None, None)
+        self.windows[monitor] = win
+
+    def remove(self, monitor):
+        win = self.windows.pop(monitor, None)
+        if win is not None:
+            win.destroy()
+
+    def child_exited(self, monitor):
+        # A screen saver that quits by itself (e.g. on a key press) ends it everywhere
+        Gtk.main_quit()
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    Saver(" ".join(argv[1:]))
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

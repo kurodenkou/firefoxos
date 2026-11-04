@@ -47,6 +47,8 @@ firox-clipboard start
 # Power saving: lock, screen off and sleep timers from Settings >
 # Power Options (~/.config/firox/power.conf, see `firox-power`)
 firox-power start
+# Low-battery warnings (laptops only; exits straight away without a battery)
+firox-power battery-watch >/dev/null 2>&1 &
 
 # "Firox Linux was updated" once after an update was applied
 ( sleep 20; firox-updates login ) >/dev/null 2>&1 &

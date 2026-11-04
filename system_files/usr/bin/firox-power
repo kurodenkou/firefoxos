@@ -6,6 +6,8 @@
 #   firox-power set KEY=VALUE...    change settings and apply them now
 #   firox-power reset               go back to the system defaults
 #   firox-power start               (re)start the idle watcher (used at login)
+#   firox-power battery             battery level and state
+#   firox-power battery-watch       low-battery warnings (runs from login)
 #
 # Keys (minutes, 0 = never):
 #   MONITOR_AC  MONITOR_BATTERY     turn the screen off when idle
@@ -14,13 +16,19 @@
 #   LOCK_ON_WAKE=1|0                lock before sleeping
 #   SCREENSAVER_WAIT                start the screen saver (see
 #                                   firox-screensaver; it picks which one)
+# Battery (percent, 0 = off):
+#   BATTERY_LOW                     warn that the battery is low
+#   BATTERY_CRITICAL                warn again, urgently
+#   BATTERY_ACTION                  then do BATTERY_ACTION_KIND:
+#   BATTERY_ACTION_KIND             0 nothing, 1 sleep, 2 hibernate, 3 shut down
 # Settings live in ~/.config/firox/power.conf (defaults: /etc/firox/power.conf).
 # Apps that play video or are full screen keep the screen on (idle inhibit).
 set -u
 
 SYS_CONF=/etc/firox/power.conf
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/firox/power.conf"
-KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE SCREENSAVER_WAIT"
+KEYS="MONITOR_AC MONITOR_BATTERY LOCK SLEEP_AC SLEEP_BATTERY LOCK_ON_WAKE SCREENSAVER_WAIT BATTERY_LOW BATTERY_CRITICAL BATTERY_ACTION BATTERY_ACTION_KIND"
+PS="${FIROX_POWER_SUPPLY:-/sys/class/power_supply}"
 
 get() {
     local v=""
@@ -30,24 +38,105 @@ get() {
     echo "$v"
 }
 
-has_battery() {
-    local t
-    for t in /sys/class/power_supply/*/type; do
-        [ "$(cat "$t" 2>/dev/null)" = Battery ] && return 0
+# The computer's own batteries (not a wireless mouse's: those have scope=Device)
+batteries() {
+    local d
+    for d in "$PS"/*; do
+        [ "$(cat "$d/type" 2>/dev/null)" = Battery ] || continue
+        [ "$(cat "$d/scope" 2>/dev/null)" = Device ] && continue
+        echo "$d"
+    done
+}
+
+has_battery() { [ -n "$(batteries)" ]; }
+
+on_mains() {
+    local d
+    for d in "$PS"/*; do
+        case "$(cat "$d/type" 2>/dev/null)" in
+            Mains|USB|USB_C|USB_PD) [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && return 0 ;;
+        esac
     done
     return 1
 }
 
 # "ac" or "battery"
 power_source() {
-    local d
     has_battery || { echo ac; return; }
-    for d in /sys/class/power_supply/*; do
-        case "$(cat "$d/type" 2>/dev/null)" in
-            Mains|USB|USB_C|USB_PD) [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && { echo ac; return; } ;;
+    on_mains && echo ac || echo battery
+}
+
+# "PERCENT STATE": overall charge of all batteries, STATE discharging|charging|full
+battery_level() {
+    local d now=0 full=0 n f pct=0 count=0 sum=0 state=full st
+    for d in $(batteries); do
+        for f in energy charge; do
+            if [ -r "$d/${f}_now" ] && [ -r "$d/${f}_full" ]; then
+                n="$(cat "$d/${f}_now")"; now=$((now + n))
+                n="$(cat "$d/${f}_full")"; full=$((full + n))
+                break
+            fi
+        done
+        sum=$((sum + $(cat "$d/capacity" 2>/dev/null || echo 0))); count=$((count + 1))
+        st="$(cat "$d/status" 2>/dev/null)"
+        case "$st" in
+            Discharging) state=discharging ;;
+            Charging) [ "$state" = discharging ] || state=charging ;;
         esac
     done
-    echo battery
+    if [ "$full" -gt 0 ]; then pct=$((now * 100 / full))
+    elif [ "$count" -gt 0 ]; then pct=$((sum / count))
+    fi
+    # "Not charging" on battery power counts as discharging
+    [ "$state" != discharging ] && ! on_mains && [ "$count" -gt 0 ] && state=discharging
+    echo "$pct $state"
+}
+
+battery_notify() { # URGENCY SUMMARY BODY ICON
+    notify-send -a Battery -u "$1" -i "$4" -h string:x-canonical-private-synchronous:firox-battery \
+        "$2" "$3" 2>/dev/null
+}
+
+battery_action() {
+    case "$(get BATTERY_ACTION_KIND)" in
+        1) systemctl suspend ;;
+        2) systemctl hibernate || systemctl suspend ;;
+        3) systemctl poweroff ;;
+    esac
+}
+
+battery_watch() {
+    has_battery || exit 0
+    local warned=none acted=0 pct state low crit act kind
+    while :; do
+        read -r pct state <<<"$(battery_level)"
+        low="$(get BATTERY_LOW)"; crit="$(get BATTERY_CRITICAL)"
+        act="$(get BATTERY_ACTION)"; kind="$(get BATTERY_ACTION_KIND)"
+        if [ "$state" != discharging ]; then
+            warned=none; acted=0
+        elif [ "$act" -gt 0 ] && [ "$kind" -gt 0 ] && [ "$pct" -le "$act" ] && [ "$acted" = 0 ]; then
+            local what
+            case "$kind" in 1) what="go to sleep" ;; 2) what="hibernate" ;; *) what="shut down" ;; esac
+            battery_notify critical "Battery nearly empty" \
+                "$pct% left. The computer will $what in 15 seconds unless you plug it in." battery-empty
+            sleep 15
+            read -r pct state <<<"$(battery_level)"
+            if [ "$state" = discharging ]; then
+                acted=1
+                battery_action
+            fi
+            continue
+        elif [ "$crit" -gt 0 ] && [ "$pct" -le "$crit" ] && [ "$warned" != critical ]; then
+            local then_=""
+            [ "$act" -gt 0 ] && [ "$kind" -gt 0 ] && then_=" At $act% the computer will $(case "$kind" in 1) echo go to sleep ;; 2) echo hibernate ;; *) echo shut down ;; esac) to protect your work."
+            battery_notify critical "Battery critically low" "$pct% left. Plug in your computer now.$then_" battery-caution
+            warned=critical
+        elif [ "$low" -gt 0 ] && [ "$pct" -le "$low" ] && [ "$warned" = none ]; then
+            battery_notify normal "Battery low" "$pct% left. Plug in your computer soon." battery-low
+            warned=low
+        fi
+        sleep "${FIROX_BATTERY_INTERVAL:-30}"
+    done
 }
 
 start() {
@@ -99,6 +188,17 @@ case "${1:-show}" in
         start
         ;;
     start) start ;;
+    battery)
+        has_battery || { echo "no battery"; exit 1; }
+        battery_level
+        ;;
+    battery-watch)
+        # Only one watcher (e.g. after logging out and back in)
+        for pid in $(pgrep -u "$USER" -f "firox-power battery-watch"); do
+            [ "$pid" != $$ ] && kill "$pid" 2>/dev/null
+        done
+        battery_watch
+        ;;
     idle)
         # Run by swayidle: only act if we're on the matching power source
         [ "$(power_source)" = "${3:-ac}" ] || exit 0
@@ -108,7 +208,7 @@ case "${1:-show}" in
         esac
         ;;
     *)
-        sed -n '2,20s/^# \{0,1\}//p' "$0" >&2
+        sed -n '2,27s/^# \{0,1\}//p' "$0" >&2
         exit 2
         ;;
 esac

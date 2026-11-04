@@ -316,14 +316,15 @@ def minutes_label(m):
 
 
 def has_battery():
-    for path in glob.glob("/sys/class/power_supply/*/type"):
+    """The computer's own battery (not a wireless mouse's: scope=Device)."""
+    def read(path):
         try:
             with open(path) as fh:
-                if fh.read().strip() == "Battery":
-                    return True
+                return fh.read().strip()
         except OSError:
-            pass
-    return False
+            return ""
+    return any(read(os.path.join(d, "type")) == "Battery" and read(os.path.join(d, "scope")) != "Device"
+               for d in glob.glob("/sys/class/power_supply/*"))
 
 
 class ScreenSaverDialog(Gtk.Dialog):
@@ -750,6 +751,12 @@ class ClipboardDialog(Gtk.Dialog):
             subprocess.run(["firox-clipboard", "set"] + changed)
 
 
+def can_hibernate():
+    out = run_text(["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1",
+                    "org.freedesktop.login1.Manager", "CanHibernate"])
+    return '"yes"' in out
+
+
 class PowerDialog(Gtk.Dialog):
     """XP-style Power Options: idle timers for the monitor, lock and sleep."""
 
@@ -799,7 +806,46 @@ class PowerDialog(Gtk.Dialog):
         wake.set_active(self.values.get("LOCK_ON_WAKE", 1) == 1)
         wake.connect("toggled", lambda b: self.values.__setitem__("LOCK_ON_WAKE", int(b.get_active())))
         box.pack_start(wake, False, False, 0)
+
+        if battery:
+            box.pack_start(Gtk.Separator(), False, False, 4)
+            title = Gtk.Label(xalign=0)
+            title.set_markup("<b>Battery</b>")
+            box.pack_start(title, False, False, 0)
+            bgrid = Gtk.Grid(column_spacing=12, row_spacing=8)
+            bgrid.attach(Gtk.Label(label="Warn me when it's down to:", xalign=0), 0, 0, 1, 1)
+            bgrid.attach(self.percent_combo("BATTERY_LOW", [0, 5, 10, 15, 20, 25, 30]), 1, 0, 1, 1)
+            bgrid.attach(Gtk.Label(label="Warn me again, urgently, at:", xalign=0), 0, 1, 1, 1)
+            bgrid.attach(self.percent_combo("BATTERY_CRITICAL", [0, 3, 4, 5, 6, 7, 8, 10]), 1, 1, 1, 1)
+            bgrid.attach(Gtk.Label(label="When it reaches", xalign=0), 0, 2, 1, 1)
+            row = Gtk.Box(spacing=8)
+            row.pack_start(self.percent_combo("BATTERY_ACTION", [1, 2, 3, 4, 5], off=False), False, False, 0)
+            kinds = [(0, "do nothing"), (1, "go to sleep")]
+            if can_hibernate():
+                kinds.append((2, "hibernate"))
+            kinds.append((3, "shut down"))
+            kind = Gtk.ComboBoxText()
+            for k, label in kinds:
+                kind.append(str(k), label)
+            kind.set_active_id(str(self.values.get("BATTERY_ACTION_KIND", 1)))
+            if kind.get_active_id() is None:
+                kind.set_active_id("1")
+            kind.connect("changed", lambda w: self.values.__setitem__("BATTERY_ACTION_KIND", int(w.get_active_id())))
+            row.pack_start(kind, False, False, 0)
+            bgrid.attach(row, 1, 2, 1, 1)
+            box.pack_start(bgrid, False, False, 0)
         self.show_all()
+
+    def percent_combo(self, key, choices, off=True):
+        cur = self.values.get(key, 0)
+        if cur not in choices:
+            choices = sorted(choices + [cur])
+        c = Gtk.ComboBoxText()
+        for p in choices:
+            c.append(str(p), "Off" if p == 0 and off else f"{p}%")
+        c.set_active_id(str(cur))
+        c.connect("changed", lambda w: self.values.__setitem__(key, int(w.get_active_id())))
+        return c
 
     def combo(self, key):
         cur = self.values.get(key, 0)

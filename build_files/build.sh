@@ -93,6 +93,7 @@ PACKAGES=(
     asciiquarium
     cmatrix
     cbonsai
+    vte291                       # screen savers on every monitor
     pavucontrol                  # Sounds and Audio Devices
     alsa-tools                   # hda-verb, for `ujust fix-realtek-audio`
     network-manager-applet       # tray icon

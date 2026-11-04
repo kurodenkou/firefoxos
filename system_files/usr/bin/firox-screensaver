@@ -49,7 +49,16 @@ list() {
     done | sort -t $'\t' -k2
 }
 
-running() { pgrep -u "$USER" -f -- "--app-id=$APP_ID" >/dev/null; }
+HELPER=/usr/libexec/firox/screensaver-window
+
+running() {
+    pgrep -u "$USER" -f -- "--app-id=$APP_ID" >/dev/null || pgrep -u "$USER" -f -- "$HELPER" >/dev/null
+}
+
+# Every monitor, in an embedded terminal (needs VTE); else foot on one monitor
+can_use_helper() {
+    python3 -c 'import gi; gi.require_version("Vte", "2.91"); gi.require_version("GtkLayerShell", "0.1")' 2>/dev/null
+}
 
 start() {
     local id="${1:-$(current)}" f cmd
@@ -64,7 +73,12 @@ start() {
         setsid -f sh -c "exec -a $APP_ID-gui $cmd" >/dev/null 2>&1
         return 0
     fi
-    # A black, borderless, full-screen terminal (labwc rule for this app id)
+    if can_use_helper; then
+        setsid -f "$HELPER" "$cmd" >/dev/null 2>&1
+        return 0
+    fi
+    # Fallback: a black, borderless, full-screen terminal (labwc rule for
+    # this app id) on the current monitor
     setsid -f foot --app-id="$APP_ID" --fullscreen --title="Screen Saver" \
         -o colors-dark.alpha=1.0 -o colors-dark.background=000000 \
         -o colors-dark.foreground=c0c0c0 -o colors-dark.regular0=000000 \
@@ -75,6 +89,7 @@ start() {
 stop() {
     makoctl mode -r screensaver >/dev/null 2>&1
     pkill -u "$USER" -f -- "--app-id=$APP_ID" 2>/dev/null
+    pkill -u "$USER" -f -- "$HELPER" 2>/dev/null
     pkill -u "$USER" -f -- "^$APP_ID-gui" 2>/dev/null
     return 0
 }

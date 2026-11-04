@@ -33,8 +33,10 @@
     <font place="OnScreenDisplay" name="Tahoma, DejaVu Sans" size="10" />
   </theme>
 
+  <!-- Alt+Tab: a grid of live window previews with icons and titles
+       (thumbnail style, themed in Firox-Luna / Firox-Modern themerc) -->
   <windowSwitcher preview="yes" outlines="yes">
-    <osd show="yes" style="classic" output="all" />
+    <osd show="yes" style="thumbnail" output="focused" thumbnailLabelFormat="%T" />
     <fields>
       <field content="icon" width="5%" />
       <field content="title" width="95%" />
