@@ -28,7 +28,7 @@
         "format": "firox",
         "tooltip": true,
         "tooltip-format": "Click here to begin.",
-        "on-click": "firox-startmenu"
+        "on-click": "firox-launch firox-startmenu"
     },
 
     // Quick Launch
@@ -36,19 +36,19 @@
         "path": "/usr/share/icons/Papirus/24x24/apps/show-desktop.svg",
         "size": 18,
         "tooltip": false,
-        "on-click": "firox-open show-desktop"
+        "on-click": "firox-launch firox-open show-desktop"
     },
     "image#ql-firefox": {
         "path": "/usr/share/icons/Papirus/24x24/apps/firefox.svg",
         "size": 18,
         "tooltip": false,
-        "on-click": "firefox"
+        "on-click": "firox-launch firefox"
     },
     "image#ql-files": {
         "path": "/usr/share/icons/Papirus/24x24/apps/system-file-manager.svg",
         "size": 18,
         "tooltip": false,
-        "on-click": "firox-open computer"
+        "on-click": "firox-launch firox-open computer"
     },
     "custom/ql-sep": {
         "format": " ",
@@ -75,8 +75,8 @@
         "return-type": "json",
         "interval": 900,
         "signal": 10,
-        "on-click": "firox-updates restart",
-        "on-click-right": "firox-updates whatsnew",
+        "on-click": "firox-launch firox-updates restart",
+        "on-click-right": "firox-launch firox-updates whatsnew",
         "tooltip": true
     },
     // Notification history + Do Not Disturb (firox-notifications)
@@ -85,8 +85,8 @@
         "return-type": "json",
         "signal": 9,
         "interval": 60,
-        "on-click": "firox-notifications toggle",
-        "on-click-right": "firox-notifications dnd toggle",
+        "on-click": "firox-launch firox-notifications toggle",
+        "on-click-right": "firox-launch firox-notifications dnd toggle",
         "tooltip": true
     },
     "tray": {
@@ -104,8 +104,8 @@
         "format-muted": "",
         "format-icons": { "default": ["", "", ""] },
         "tooltip-format": "Volume: {volume}%\nClick for the volume control. Right-click to mute.",
-        "on-click": "firox-volume toggle",
-        "on-click-right": "firox-osd volume mute",
+        "on-click": "firox-launch firox-volume toggle",
+        "on-click-right": "firox-launch firox-osd volume mute",
         "scroll-step": 5
     },
     "battery": {
@@ -118,7 +118,7 @@
     "clock": {
         "format": "{:%I:%M %p}",
         "tooltip-format": "{:%A, %B %d, %Y}\nClick for the calendar",
-        "on-click": "firox-calendar toggle",
-        "on-click-right": "firox-control-panel datetime"
+        "on-click": "firox-launch firox-calendar toggle",
+        "on-click-right": "firox-launch firox-control-panel datetime"
     }
 }

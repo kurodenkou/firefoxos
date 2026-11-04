@@ -1,0 +1,18 @@
+#!/usr/bin/bash
+# firox-launch: run a command without the file descriptors it inherited.
+#
+#   firox-launch COMMAND [ARGS...]
+#
+# waybar starts its click actions with all of its own open files, including
+# the pipe it reads a module's output from. A program that keeps running (the
+# notification panel, the calendar, Firefox...) then holds that pipe open and
+# waybar waits on it forever, so the module (e.g. the bell's count) stops
+# updating. The taskbar's click actions go through this to drop them first.
+
+for fd in $(ls /proc/$$/fd 2>/dev/null); do
+    # keep stdin/out/err and bash's own handle on this script
+    if [ "$fd" -gt 2 ] && [ "$fd" -ne 255 ]; then
+        eval "exec $fd>&-" 2>/dev/null
+    fi
+done
+exec "$@"

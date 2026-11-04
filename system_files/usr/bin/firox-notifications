@@ -165,7 +165,20 @@ def status():
 def daemon():
     from gi.repository import Gio, GLib
 
-    apply_dnd(dnd_on())
+    if dnd_on():
+        # Wait for the session's mako: makoctl would otherwise start one
+        # through D-Bus, without the Firox look, before the autostart's own
+        tries = [0]
+
+        def restore_dnd():
+            tries[0] += 1
+            running = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "mako"],
+                                     stdout=subprocess.DEVNULL).returncode == 0
+            if running or tries[0] >= 30:
+                apply_dnd(dnd_on())
+                return False
+            return True
+        GLib.timeout_add(500, restore_dnd)
     pending = {}   # (caller, serial) -> seq, to learn the id the server gives back
 
     def record(msg):
