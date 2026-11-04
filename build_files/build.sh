@@ -62,6 +62,7 @@ PACKAGES=(
     cliphist                     # clipboard history (firox-clipboard, Super+V)
     brightnessctl
     playerctl
+    tuned-ppd                    # power profiles (battery popup: Power saver/Balanced/Performance)
 
     # --- Login screen ---
     greetd
@@ -158,6 +159,9 @@ systemctl set-default graphical.target
 
 # Waydroid container manager (images are downloaded by `ujust setup-waydroid`)
 systemctl enable waydroid-container.service
+
+# Power profiles (tuned, with the power-profiles-daemon D-Bus API)
+systemctl enable tuned.service tuned-ppd.service
 
 ### ---------------------------------------------------------------------------
 ### 5. Branding

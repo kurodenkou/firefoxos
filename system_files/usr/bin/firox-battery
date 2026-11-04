@@ -1,0 +1,419 @@
+#!/usr/bin/python3
+"""
+firox-battery: the battery popup (click the battery on the taskbar).
+
+    firox-battery [toggle|show|hide]
+
+Shows the charge and time left, how much of its original charge the battery
+still holds, a screen brightness slider (on screens with a backlight) and the
+power mode: Power saver, Balanced or Performance (tuned-ppd, the
+power-profiles-daemon API). Power Options… opens the full settings. Closes
+on Esc or a click anywhere else. Styled by the theme's battery.css.
+"""
+
+import glob
+import os
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell  # noqa: E402
+except (ValueError, ImportError):
+    GtkLayerShell = None
+
+THEMES = "/usr/share/firox/themes"
+PS = os.environ.get("FIROX_POWER_SUPPLY", "/sys/class/power_supply")
+PROFILES = [
+    # (name, label, explanation)
+    ("power-saver", "Power saver", "Longer battery life, slower"),
+    ("balanced", "Balanced", "Speed when you need it"),
+    ("performance", "Performance", "Fastest, uses more power"),
+]
+
+
+def read(path):
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def num(path):
+    try:
+        return int(read(path))
+    except ValueError:
+        return None
+
+
+def run(argv):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def battery():
+    """Combined state of the computer's batteries (not a mouse's), or None."""
+    bats, mains = [], False
+    for d in sorted(glob.glob(os.path.join(PS, "*"))):
+        kind = read(os.path.join(d, "type"))
+        if kind == "Battery" and read(os.path.join(d, "scope")) != "Device":
+            bats.append(d)
+        elif kind == "Mains" and read(os.path.join(d, "online")) == "1":
+            mains = True
+    if not bats:
+        return None
+    caps = [num(os.path.join(d, "capacity")) or 0 for d in bats]
+    status = {read(os.path.join(d, "status")) for d in bats}
+    out = {"pct": sum(caps) // len(caps), "charging": "Charging" in status,
+           "plugged": mains or "Charging" in status or status <= {"Full", "Not charging"},
+           "full": status <= {"Full"}}
+    now = full = design = rate = 0
+    for d in bats:
+        n = num(os.path.join(d, "energy_now")) or num(os.path.join(d, "charge_now")) or 0
+        f = num(os.path.join(d, "energy_full")) or num(os.path.join(d, "charge_full")) or 0
+        g = num(os.path.join(d, "energy_full_design")) or num(os.path.join(d, "charge_full_design")) or 0
+        r = num(os.path.join(d, "power_now")) or num(os.path.join(d, "current_now")) or 0
+        now, full, design, rate = now + n, full + f, design + g, rate + abs(r)
+    out["health"] = round(100 * full / design) if design and full else None
+    hours = None
+    if rate > 0:
+        hours = (full - now) / rate if out["charging"] else (None if out["plugged"] else now / rate)
+    out["hours"] = hours if hours and 0 < hours < 48 else None
+    return out
+
+
+def duration(hours):
+    h, m = divmod(int(hours * 60), 60)
+    return f"{h} h {m:02d} min" if h else f"{m} min"
+
+
+def backlight():
+    """(device, percent) of the screen backlight, or None."""
+    out = run(["brightnessctl", "-m", "-c", "backlight", "info"])
+    parts = out.strip().split(",")
+    if len(parts) >= 4 and parts[3].endswith("%"):
+        try:
+            return parts[0], int(parts[3][:-1])
+        except ValueError:
+            pass
+    return None
+
+
+class Profiles:
+    """Power mode, over the power-profiles-daemon D-Bus API (tuned-ppd)."""
+
+    NAMES = [("org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles"),
+             ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles")]
+
+    def __init__(self):
+        self.proxy = None
+        for name, path in self.NAMES:
+            try:
+                p = Gio.DBusProxy.new_for_bus_sync(Gio.BusType.SYSTEM, Gio.DBusProxyFlags.NONE, None,
+                                                   name, path, name, None)
+            except GLib.Error:
+                continue
+            if p.get_name_owner():
+                self.proxy = p
+                break
+
+    def available(self):
+        if self.proxy is None:
+            return []
+        v = self.proxy.get_cached_property("Profiles")
+        return [p.get("Profile") for p in (v.unpack() if v else [])]
+
+    def active(self):
+        if self.proxy is None:
+            return None
+        v = self.proxy.get_cached_property("ActiveProfile")
+        return v.unpack() if v else None
+
+    def set(self, profile):
+        if self.proxy is None:
+            return
+        try:
+            self.proxy.call_sync("org.freedesktop.DBus.Properties.Set",
+                                 GLib.Variant("(ssv)", (self.proxy.get_interface_name(), "ActiveProfile",
+                                                        GLib.Variant("s", profile))),
+                                 Gio.DBusCallFlags.NONE, 5000, None)
+        except GLib.Error as err:
+            print(f"battery: can't change the power mode: {err.message}", file=sys.stderr)
+
+
+def theme_css():
+    cfg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    name = "classic"
+    for path in (os.path.join(cfg, "firox", "theme"), "/etc/firox/theme"):
+        if read(path):
+            name = read(path)
+            break
+    path = os.path.join(THEMES, name, "battery.css")
+    return path if os.path.exists(path) else os.path.join(THEMES, "classic", "battery.css")
+
+
+def icon_for(b):
+    """The battery icon at this level, by Papirus' or Adwaita's naming."""
+    if b is None:
+        names = ["battery-missing-symbolic", "ac-adapter-symbolic"]
+    else:
+        tens = min(100, (b["pct"] + 5) // 10 * 10)
+        chg = "-charging" if b["charging"] else ""
+        names = [f"battery-{tens:03d}{chg}-symbolic", f"battery-level-{tens}{chg}-symbolic",
+                 "battery-good-charging-symbolic" if chg else "battery-good-symbolic"]
+    theme = Gtk.IconTheme.get_default()
+    return next((n for n in names if theme.has_icon(n)), names[-1])
+
+
+class Popup(Gtk.Window):
+    def __init__(self, app):
+        super().__init__(application=app, title="Battery")
+        self.set_decorated(False)
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+        self.set_app_paintable(True)
+        self.provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_screen(screen, self.provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        if GtkLayerShell and GtkLayerShell.is_supported():
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_namespace(self, "firox-battery")
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+            for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                         GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+                GtkLayerShell.set_anchor(self, edge, True)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+
+        catcher = Gtk.EventBox()
+        catcher.set_visible_window(False)
+        catcher.connect("button-press-event", lambda *_: self.hide() or True)
+        self.add(catcher)
+        self.connect("key-press-event", self.on_key)
+        self.connect("delete-event", lambda *_: self.hide() or True)
+
+        swallow = Gtk.EventBox()
+        swallow.set_visible_window(False)
+        swallow.connect("button-press-event", lambda *_: True)
+        swallow.set_halign(Gtk.Align.END)
+        swallow.set_valign(Gtk.Align.END)
+        catcher.add(swallow)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_name("panel")
+        swallow.add(box)
+
+        head = Gtk.Box(spacing=8)
+        head.set_name("panel-header")
+        title = Gtk.Label(label="Battery", xalign=0)
+        title.get_style_context().add_class("title")
+        head.pack_start(title, True, True, 0)
+        box.pack_start(head, False, False, 0)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        body.set_name("body")
+        box.pack_start(body, False, False, 0)
+
+        level = Gtk.Box(spacing=12)
+        self.icon = Gtk.Image()
+        self.icon.set_pixel_size(40)
+        level.pack_start(self.icon, False, False, 0)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        texts.set_valign(Gtk.Align.CENTER)
+        self.pct = Gtk.Label(xalign=0)
+        self.pct.set_name("percent")
+        self.state = Gtk.Label(xalign=0)
+        self.health = Gtk.Label(xalign=0)
+        self.health.get_style_context().add_class("dim")
+        for w in (self.pct, self.state, self.health):
+            texts.pack_start(w, False, False, 0)
+        level.pack_start(texts, True, True, 0)
+        body.pack_start(level, False, False, 0)
+
+        self.bright_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.bright_box.set_no_show_all(True)
+        bl = Gtk.Label(label="Screen brightness", xalign=0)
+        bl.get_style_context().add_class("section")
+        self.bright_box.pack_start(bl, False, False, 0)
+        row = Gtk.Box(spacing=8)
+        dim = Gtk.Image.new_from_icon_name("display-brightness-low-symbolic", Gtk.IconSize.MENU)
+        row.pack_start(dim, False, False, 0)
+        self.bright = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL,
+                                adjustment=Gtk.Adjustment(value=50, lower=5, upper=100,
+                                                          step_increment=5, page_increment=10))
+        self.bright.set_draw_value(False)
+        self.bright.set_size_request(170, -1)
+        self.bright_handler = self.bright.connect("value-changed", self.on_bright)
+        row.pack_start(self.bright, True, True, 0)
+        row.pack_start(Gtk.Image.new_from_icon_name("display-brightness-high-symbolic", Gtk.IconSize.MENU),
+                       False, False, 0)
+        self.bright_box.pack_start(row, False, False, 0)
+        for w in (bl, row, dim) + tuple(row.get_children()):
+            w.show()
+        body.pack_start(self.bright_box, False, False, 0)
+
+        self.mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.mode_box.set_no_show_all(True)
+        ml = Gtk.Label(label="Power mode", xalign=0)
+        ml.get_style_context().add_class("section")
+        self.mode_box.pack_start(ml, False, False, 0)
+        self.modes = {}
+        group = None
+        for name, label, explain in PROFILES:
+            rb = Gtk.RadioButton.new_with_label_from_widget(group, label)
+            group = group or rb
+            rb.set_tooltip_text(explain)
+            rb.connect("toggled", self.on_mode, name)
+            self.mode_box.pack_start(rb, False, False, 0)
+            self.modes[name] = rb
+        body.pack_start(self.mode_box, False, False, 0)
+
+        foot = Gtk.Box()
+        foot.set_name("panel-footer")
+        more = Gtk.Button(label="Power Options…")
+        more.get_style_context().add_class("link")
+        more.set_tooltip_text("Screen off, sleep and low-battery settings")
+        more.connect("clicked", self.on_more)
+        foot.pack_start(more, False, False, 0)
+        box.pack_start(foot, False, False, 0)
+
+        self.profiles = None
+        self.dev = None
+        self.timer = None
+        self.updating = False
+
+    # ----------------------------------------------------------- refresh --
+
+    def refresh(self):
+        b = battery()
+        self.icon.set_from_icon_name(icon_for(b), Gtk.IconSize.DIALOG)
+        self.icon.set_pixel_size(40)
+        if b is None:
+            self.pct.set_text("No battery")
+            self.state.set_text("This computer runs on mains power.")
+            self.health.hide()
+        else:
+            self.pct.set_text(f"{b['pct']}%")
+            if b["charging"]:
+                st = "Charging" + (f", {duration(b['hours'])} until full" if b["hours"] else "")
+            elif b["full"] or (b["plugged"] and b["pct"] >= 99):
+                st = "Plugged in, fully charged"
+            elif b["plugged"]:
+                st = "Plugged in, not charging"
+            else:
+                st = f"{duration(b['hours'])} remaining" if b["hours"] else "On battery"
+            self.state.set_text(st)
+            if b["health"] and b["health"] < 100:
+                self.health.set_text(f"Holds {b['health']}% of its original charge")
+                self.health.show()
+            else:
+                self.health.hide()
+        bl = backlight()
+        self.bright_box.set_visible(bl is not None)
+        if bl is not None:
+            self.dev = bl[0]
+            if not self.bright.has_grab():
+                with self.bright.handler_block(self.bright_handler):
+                    self.bright.set_value(max(5, bl[1]))
+        return True
+
+    def fill_modes(self):
+        self.profiles = Profiles()
+        avail = self.profiles.available()
+        self.mode_box.set_visible(bool(avail))
+        if not avail:
+            return
+        self.mode_box.get_children()[0].show()
+        active = self.profiles.active()
+        self.updating = True
+        for name, rb in self.modes.items():
+            rb.set_visible(name in avail)
+            if name == active:
+                rb.set_active(True)
+        self.updating = False
+
+    # ----------------------------------------------------------- actions --
+
+    def on_bright(self, scale):
+        args = ["brightnessctl", "-q"] + (["-d", self.dev] if self.dev else []) + \
+               ["set", f"{int(scale.get_value())}%"]
+        subprocess.Popen(args)
+
+    def on_mode(self, rb, name):
+        if rb.get_active() and not self.updating and self.profiles is not None:
+            self.profiles.set(name)
+
+    def on_more(self, _b):
+        self.hide()
+        try:
+            GLib.spawn_async(["firox-control-panel", "power"], flags=GLib.SpawnFlags.SEARCH_PATH)
+        except GLib.Error:
+            pass
+
+    def on_key(self, _w, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide()
+        return False
+
+    def follow_app_style(self):
+        """Stays running between clicks: pick up a Classic/Modern switch."""
+        try:
+            iface = Gio.Settings.new("org.gnome.desktop.interface")
+        except Exception:  # noqa: BLE001 - schema missing
+            return
+        st = Gtk.Settings.get_default()
+        st.set_property("gtk-theme-name", iface.get_string("gtk-theme"))
+        st.set_property("gtk-icon-theme-name", iface.get_string("icon-theme"))
+        st.set_property("gtk-application-prefer-dark-theme",
+                        iface.get_string("color-scheme") == "prefer-dark")
+
+    def open(self):
+        self.follow_app_style()
+        try:
+            self.provider.load_from_path(theme_css())
+        except GLib.Error as err:
+            print(f"battery: {err.message}", file=sys.stderr)
+        self.show_all()
+        self.fill_modes()
+        self.refresh()
+        if self.timer is None:
+            self.timer = GLib.timeout_add_seconds(5, self.refresh)
+        self.present()
+
+    def do_hide(self):
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        Gtk.Window.do_hide(self)
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Battery",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        cmd = args[0] if args else "toggle"
+        if self.win is None:
+            self.win = Popup(self)
+        if cmd == "hide" or (cmd == "toggle" and self.win.get_visible()):
+            self.win.hide()
+        else:
+            self.win.open()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))
