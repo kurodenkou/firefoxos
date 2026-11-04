@@ -59,10 +59,13 @@
         "format": "{icon} {title:.24}",
         "icon-size": 16,
         "icon-theme": "Papirus",
-        "tooltip-format": "{title}",
+        "tooltip-format": "{title}\nRight-click to bring it forward, then Alt+Space for its menu. Middle-click closes it.",
         "on-click": "minimize-raise",
         "on-click-middle": "close",
-        "on-click-right": "close",
+        // Right-click used to close the window outright. waybar's taskbar
+        // can't show a menu, so bring the window forward instead; Alt+Space
+        // then opens its window menu (Restore, Minimize, Maximize, Close...)
+        "on-click-right": "activate",
         "all-outputs": false
     },
 
@@ -100,9 +103,9 @@
         "format": "{icon}",
         "format-muted": "",
         "format-icons": { "default": ["", "", ""] },
-        "tooltip-format": "Volume: {volume}%",
-        "on-click": "pavucontrol",
-        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+        "tooltip-format": "Volume: {volume}%\nClick for the volume control. Right-click to mute.",
+        "on-click": "firox-volume toggle",
+        "on-click-right": "firox-osd volume mute",
         "scroll-step": 5
     },
     "battery": {

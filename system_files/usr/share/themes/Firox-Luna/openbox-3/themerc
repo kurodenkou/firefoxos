@@ -71,6 +71,16 @@ osd.window-switcher.style-classic.item.padding.y: 3
 osd.window-switcher.style-classic.item.active.border.width: 2
 osd.window-switcher.style-classic.item.active.border.color: #316ac5
 osd.window-switcher.style-classic.item.active.bg.color: #c1d2ee
+# Alt+Tab thumbnail grid
+osd.window-switcher.style-thumbnail.width.max: 80%
+osd.window-switcher.style-thumbnail.padding: 8
+osd.window-switcher.style-thumbnail.item.width: 230
+osd.window-switcher.style-thumbnail.item.height: 170
+osd.window-switcher.style-thumbnail.item.padding: 8
+osd.window-switcher.style-thumbnail.item.active.border.width: 2
+osd.window-switcher.style-thumbnail.item.active.border.color: #316ac5
+osd.window-switcher.style-thumbnail.item.active.bg.color: #c1d2ee
+osd.window-switcher.style-thumbnail.item.icon.size: 32
 osd.window-switcher.preview.border.width: 2
 osd.window-switcher.preview.border.color: #316ac5,#ffffff,#316ac5
 

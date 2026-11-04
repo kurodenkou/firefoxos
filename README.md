@@ -45,7 +45,7 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Piece | What it is |
 |---|---|
 | Window manager | [labwc](https://labwc.github.io/) (wlroots, Openbox-style) with the `Firox-Luna` theme: blue gradient titlebars, rounded minimise/maximise/close buttons |
-| Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock |
+| Taskbar | [waybar](https://github.com/Alexays/Waybar): start button, Quick Launch, window buttons, tray, volume, network, battery, clock. Click a window button to show or minimise it, right-click to bring it forward (then **Alt+Space** for its window menu), middle-click to close it. Click the speaker for a volume slider with Mute and a choice of speakers/headphones (`firox-volume`) |
 | Start menu | `firox-startmenu`: Python + GTK3 + gtk-layer-shell. A **firox** button, user picture header, pinned **Internet** / **Web Apps** / **Android Apps**, most-used programs, **All Programs** (grouped, with Web Apps and Android Apps folders, type to search), Documents / Pictures / Music / Computer / Network Places, Settings, **Bazaar** (app store), Help, Search, Run, **Log Off** and **Turn Off Computer** dialogs |
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus Computer / Home / Recycle Bin / Network icons |
 | Settings | `firox-control-panel` (the Control Panel): Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Bazaar, Date and Time, **User Accounts** (change your account picture from a built-in set or any image, or your password; also opened by clicking the picture in the Start menu), System... |
@@ -59,8 +59,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Snipping Tool | `firox-snip` (Start → All Programs, or **Super+Shift+S** to go straight to selecting): snip a rectangle, the whole screen or one monitor, with an optional 3/5/10 second delay. Each snip is copied to the clipboard; mark it up with a pen or highlighter, then Copy, Save (to Pictures/Screenshots) or Save As (PNG or JPEG). **Print Screen** still saves the whole screen straight to Pictures, and **Shift+Print Screen** saves an area there |
 | Calendar | Click the clock for the time, date and a month calendar (`firox-calendar`), with a link to Date and Time settings; right-click the clock to open those settings directly |
 | Clipboard | `firox-clipboard` (cliphist): what you copy stays available after the app you copied it from closes (normally it's lost on Wayland), **Super+V** clipboard history with search and images, never stores items password managers mark as sensitive, cleared at logout by default. **Settings → Clipboard** sets the history size or turns it off. The Command Prompt also takes `Ctrl+Insert` / `Shift+Insert`, and Waydroid shares the clipboard with Android (`python3-pyclip`) |
-| Power saving | **Settings → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
-| Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
+| Power saving | **Settings → Power Options** (`firox-power`): on laptops, low-battery warnings (10%, then urgently at 5%) and at 3% the computer goes to sleep (or hibernates or shuts down, as you choose) after a 15-second warning. Also: turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
+| Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen on every monitor after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, foot "Command Prompt", htop "Task Manager" |
 
 ![Power Options on a laptop](docs/screenshots/power-options.png)
@@ -70,6 +70,10 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 ![Notification panel, Modern and Classic](docs/screenshots/notifications.png)
 
 ![Volume and brightness popups, Modern and Classic](docs/screenshots/osd.png)
+
+| Volume (Modern, Classic) | Alt+Tab |
+|---|---|
+| ![Volume popup](docs/screenshots/volume.png) | ![Alt+Tab](docs/screenshots/alt-tab.png) |
 
 | Snipping Tool | Calendar (Modern, Classic) |
 |---|---|
@@ -81,7 +85,7 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 
 ### Keyboard shortcuts
 
-`Super` Start menu · `Super+E` Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+V` clipboard history · `Super+←/→` snap · `Alt+Tab` switch windows · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot · `Super+Shift+S` Snipping Tool
+`Super` Start menu · `Super+E` Computer · `Super+R` Run · `Super+D` show desktop · `Super+L` lock · `Super+V` clipboard history · `Super+←/→` snap · `Alt+Tab` switch windows (with live previews) · `Alt+Space` window menu · `Ctrl+Alt+Del` Task Manager · `PrtSc` screenshot · `Super+Shift+S` Snipping Tool
 
 ## Repository layout
 
