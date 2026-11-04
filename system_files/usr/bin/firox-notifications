@@ -10,7 +10,7 @@ firox-notifications: notification history and Do Not Disturb.
                                       ones, like a low battery, still do)
     firox-notifications clear         forget all notifications
     firox-notifications list          print the history
-    firox-notifications status        JSON for the taskbar bell (waybar)
+    firox-notifications status        JSON for the taskbar bell
     firox-notifications daemon        record notifications (started at login)
 
 Pop-ups disappear after a few seconds; the daemon records every notification
@@ -73,7 +73,7 @@ def write_text(path, text):
 
 def unread(items):
     seen = read_int(SEEN)
-    return [n for n in items if n.get("seq", 0) > seen and not n.get("read")]
+    return [n for n in items if n.get("seq", 0) > seen]
 
 
 def mark_seen(items):
@@ -144,18 +144,11 @@ def when(ts):
 # -------------------------------------------------------------------- status --
 
 def status():
-    items = load()
-    new = unread(items)
+    """The bell: just Do Not Disturb on or off (no count of new ones)."""
     if dnd_on():
-        text, cls = BELL_OFF, "dnd"
-        tip = "Do Not Disturb is on"
+        text, cls, tip = BELL_OFF, "dnd", "Do Not Disturb is on"
     else:
-        text, cls = BELL, "unread" if new else "read"
-        tip = "Notifications"
-    if new:
-        text += f" {len(new)}"
-        tip += f"\n{len(new)} new: " + ", ".join(dict.fromkeys(n.get("app") or n.get("summary", "")
-                                                                 for n in new[:5]))
+        text, cls, tip = BELL, "read", "Notifications"
     tip += "\nClick to open. Right-click for Do Not Disturb."
     print(json.dumps({"text": text, "tooltip": tip, "class": cls}))
 
@@ -196,12 +189,10 @@ def daemon():
                 items.remove(entry)
         seq = max([n.get("seq", 0) for n in items] + [read_int(SEEN)]) + 1
         entry = dict(entry or {})
-        entry.pop("read", None)
         entry.update(seq=seq, time=time.time(), app=app, icon=icon or hints.get("image-path") or "",
                      summary=plain(summary), body=plain(body),
                      urgency=int(hints.get("urgency", 1)),
-                     desktop_entry=hints.get("desktop-entry") or "",
-                     quiet=dnd_on())
+                     desktop_entry=hints.get("desktop-entry") or "")
         items.insert(0, entry)
         pending[(msg.get_sender(), msg.get_serial())] = seq
         save(items)
@@ -221,24 +212,6 @@ def daemon():
                 save(items)
                 break
 
-    def closed(msg):
-        """The user closed a pop-up (or the app withdrew it): it no longer
-        counts as new. Ones that timed out on their own still do, and so do
-        ones that arrived during Do Not Disturb: turning that off clears them
-        from the screen unseen."""
-        try:
-            server_id, reason = msg.get_body().unpack()
-        except (TypeError, ValueError):
-            return
-        if reason not in (2, 3):          # 1 = expired, 2 = dismissed, 3 = closed by the app
-            return
-        items = load()
-        # Newest first; ids start again from 1 if mako restarts
-        n = next((n for n in items if n.get("server_id") == server_id), None)
-        if n is not None and not n.get("read") and not n.get("quiet"):
-            n["read"] = True
-            save(items)
-
     def on_message(_conn, msg, incoming):
         if not incoming:
             return msg            # our own BecomeMonitor call
@@ -247,10 +220,6 @@ def daemon():
             if msg.get_member() == "Notify":
                 GLib.idle_add(lambda: record(msg) and False)
             return None           # a monitor must never answer
-        if kind == Gio.DBusMessageType.SIGNAL and msg.get_member() == "NotificationClosed":
-            # Queued after the reply that taught us its id
-            GLib.idle_add(lambda: closed(msg) and False)
-            return None
         if (kind == Gio.DBusMessageType.METHOD_RETURN and msg.get_reply_serial()
                 and msg.get_sender() != "org.freedesktop.DBus"):   # not our own BecomeMonitor reply
             # Queued after the Notify it answers, so record() has run first
@@ -269,7 +238,6 @@ def daemon():
         GLib.Variant("(asu)", ([
             "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
             "type='method_return',sender='org.freedesktop.Notifications'",
-            "type='signal',interface='org.freedesktop.Notifications',member='NotificationClosed'",
         ], 0)),
         None, Gio.DBusCallFlags.NONE, -1, None)
     refresh_taskbar()

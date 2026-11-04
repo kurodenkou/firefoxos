@@ -37,6 +37,7 @@ PACKAGES=(
     # --- Wayland desktop: compositor, panel, start menu runtime ---
     labwc
     waybar
+    python3-pywayland
     gtk3
     gtk-layer-shell
     python3-gobject

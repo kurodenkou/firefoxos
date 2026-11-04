@@ -93,11 +93,13 @@ reset-desktop:
 customize-desktop:
     #!/usr/bin/bash
     set -euo pipefail
-    for d in labwc waybar; do
+    for d in labwc; do
         if [ -e ~/.config/$d ]; then echo "~/.config/$d already exists, skipping"; continue; fi
         cp -r /etc/xdg/$d ~/.config/$d
         echo "Copied /etc/xdg/$d -> ~/.config/$d"
     done
+    echo "Taskbar: add your own CSS rules to ~/.config/firox/panel.css (applied straight away)."
+    echo "To use waybar instead, copy /etc/xdg/waybar to ~/.config/waybar and log off and back on."
 
 # Switch the desktop look: "classic" (blue/green) or "modern" (grey, translucent)
 [group('Firox Linux')]
