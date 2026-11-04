@@ -29,3 +29,9 @@ scale slider { min-width: 16px; min-height: 16px; background-color: #f2f2f2; bor
 #body .dim { color: #a8a8a8; }
 #body .section { color: #f2f2f2; font-weight: bold; margin-top: 4px; }
 #body radiobutton label { color: #e8e8e8; }
+#body radiobutton radio {
+    min-width: 14px; min-height: 14px;
+    border: 1px solid #a8a8a8; border-radius: 8px;
+    background-image: none; background-color: transparent;
+}
+#body radiobutton radio:checked { border-color: #f2f2f2; background-color: #f2f2f2; color: #242424; }

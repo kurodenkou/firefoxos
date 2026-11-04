@@ -65,6 +65,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 
 ![Taskbar: a group of three terminals opened, the same windows ungrouped, and the Modern look](docs/screenshots/taskbar.png)
 
+![Battery popup, Classic and Modern](docs/screenshots/battery.png)
+
 ![Power Options on a laptop](docs/screenshots/power-options.png)
 
 ![Clipboard history (Super+V)](docs/screenshots/clipboard-history.png)

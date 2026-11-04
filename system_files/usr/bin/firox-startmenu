@@ -453,7 +453,8 @@ class StartMenu(Gtk.Window):
                 ["firox-quicklaunch", "remove" if pinned else "add", ident]))
             menu.append(item)
         menu.show_all()
-        menu.attach_to_widget(btn, None)
+        # Not attached to the item: it would inherit the item's hover
+        # colours (white text) from the theme
         self._ctx_menu = menu          # keep it alive while open
         menu.popup_at_pointer(event)
         return True

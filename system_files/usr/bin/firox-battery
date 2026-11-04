@@ -162,12 +162,16 @@ def theme_css():
 
 
 def icon_for(b):
+    """The battery icon at this level, by Papirus' or Adwaita's naming."""
     if b is None:
-        return "battery-missing-symbolic"
-    level = min(100, (b["pct"] + 5) // 10 * 10)
-    level = {100: "100", 90: "090", 80: "080", 70: "070", 60: "060", 50: "050", 40: "040",
-             30: "030", 20: "020", 10: "010", 0: "000"}[level]
-    return f"battery-level-{level}{'-charging' if b['charging'] else ''}-symbolic"
+        names = ["battery-missing-symbolic", "ac-adapter-symbolic"]
+    else:
+        tens = min(100, (b["pct"] + 5) // 10 * 10)
+        chg = "-charging" if b["charging"] else ""
+        names = [f"battery-{tens:03d}{chg}-symbolic", f"battery-level-{tens}{chg}-symbolic",
+                 "battery-good-charging-symbolic" if chg else "battery-good-symbolic"]
+    theme = Gtk.IconTheme.get_default()
+    return next((n for n in names if theme.has_icon(n)), names[-1])
 
 
 class Popup(Gtk.Window):
@@ -370,7 +374,6 @@ class Popup(Gtk.Window):
         st = Gtk.Settings.get_default()
         st.set_property("gtk-theme-name", iface.get_string("gtk-theme"))
         st.set_property("gtk-icon-theme-name", iface.get_string("icon-theme"))
-        Gtk.IconTheme.get_default().set_custom_theme(iface.get_string("icon-theme"))
         st.set_property("gtk-application-prefer-dark-theme",
                         iface.get_string("color-scheme") == "prefer-dark")
 
