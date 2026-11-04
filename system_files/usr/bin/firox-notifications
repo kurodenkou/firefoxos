@@ -73,7 +73,7 @@ def write_text(path, text):
 
 def unread(items):
     seen = read_int(SEEN)
-    return [n for n in items if n.get("seq", 0) > seen]
+    return [n for n in items if n.get("seq", 0) > seen and not n.get("read")]
 
 
 def mark_seen(items):
@@ -183,10 +183,12 @@ def daemon():
                 items.remove(entry)
         seq = max([n.get("seq", 0) for n in items] + [read_int(SEEN)]) + 1
         entry = dict(entry or {})
+        entry.pop("read", None)
         entry.update(seq=seq, time=time.time(), app=app, icon=icon or hints.get("image-path") or "",
                      summary=plain(summary), body=plain(body),
                      urgency=int(hints.get("urgency", 1)),
-                     desktop_entry=hints.get("desktop-entry") or "")
+                     desktop_entry=hints.get("desktop-entry") or "",
+                     quiet=dnd_on())
         items.insert(0, entry)
         pending[(msg.get_sender(), msg.get_serial())] = seq
         save(items)
@@ -206,6 +208,24 @@ def daemon():
                 save(items)
                 break
 
+    def closed(msg):
+        """The user closed a pop-up (or the app withdrew it): it no longer
+        counts as new. Ones that timed out on their own still do, and so do
+        ones that arrived during Do Not Disturb: turning that off clears them
+        from the screen unseen."""
+        try:
+            server_id, reason = msg.get_body().unpack()
+        except (TypeError, ValueError):
+            return
+        if reason not in (2, 3):          # 1 = expired, 2 = dismissed, 3 = closed by the app
+            return
+        items = load()
+        # Newest first; ids start again from 1 if mako restarts
+        n = next((n for n in items if n.get("server_id") == server_id), None)
+        if n is not None and not n.get("read") and not n.get("quiet"):
+            n["read"] = True
+            save(items)
+
     def on_message(_conn, msg, incoming):
         if not incoming:
             return msg            # our own BecomeMonitor call
@@ -214,6 +234,10 @@ def daemon():
             if msg.get_member() == "Notify":
                 GLib.idle_add(lambda: record(msg) and False)
             return None           # a monitor must never answer
+        if kind == Gio.DBusMessageType.SIGNAL and msg.get_member() == "NotificationClosed":
+            # Queued after the reply that taught us its id
+            GLib.idle_add(lambda: closed(msg) and False)
+            return None
         if (kind == Gio.DBusMessageType.METHOD_RETURN and msg.get_reply_serial()
                 and msg.get_sender() != "org.freedesktop.DBus"):   # not our own BecomeMonitor reply
             # Queued after the Notify it answers, so record() has run first
@@ -232,6 +256,7 @@ def daemon():
         GLib.Variant("(asu)", ([
             "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
             "type='method_return',sender='org.freedesktop.Notifications'",
+            "type='signal',interface='org.freedesktop.Notifications',member='NotificationClosed'",
         ], 0)),
         None, Gio.DBusCallFlags.NONE, -1, None)
     refresh_taskbar()
