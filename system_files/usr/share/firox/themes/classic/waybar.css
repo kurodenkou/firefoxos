@@ -97,7 +97,7 @@ tooltip label {
 }
 
 /* ---- notification area ---- */
-#tray, #idle_inhibitor, #pulseaudio, #battery, #custom-notifications, #clock {
+#tray, #idle_inhibitor, #pulseaudio, #battery, #custom-updates, #custom-notifications, #clock {
     background-image: linear-gradient(to bottom,
         #0c59b9 0%, #139ee9 6%, #18b5f2 12%, #139beb 50%,
         #1290e8 88%, #0d8dea 94%, #0c59b9 100%);
@@ -109,7 +109,7 @@ tooltip label {
     border-left: 1px solid #092e8f;
     box-shadow: inset 1px 0 1px rgba(255, 255, 255, 0.35);
 }
-#idle_inhibitor, #pulseaudio, #battery, #custom-notifications {
+#idle_inhibitor, #pulseaudio, #battery, #custom-updates, #custom-notifications {
     font-family: "Font Awesome 6 Free";
     font-weight: 900;
     font-size: 12px;
@@ -124,3 +124,6 @@ tooltip label {
 /* notification bell: new notifications / Do Not Disturb */
 #custom-notifications.unread { color: #fff6a8; }
 #custom-notifications.dnd { color: #b8d4ff; }
+
+/* update waiting for a restart (firox-updates) */
+#custom-updates.pending { color: #fff6a8; }

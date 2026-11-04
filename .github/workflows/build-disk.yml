@@ -1,6 +1,9 @@
 ---
 name: Build disk images
 
+# Manual only (Actions > Build disk images > Run workflow): ISOs are usually
+# built locally with `just build-iso` (see README).
+
 on:
   workflow_dispatch:
     inputs:
@@ -9,13 +12,6 @@ on:
         required: false
         default: false
         type: boolean
-  pull_request:
-    branches:
-      - main
-    paths:
-      - './disk_config/disk.toml'
-      - './disk_config/iso.toml'
-      - './.github/workflows/build-disk.yml'
 
 env:
   IMAGE_NAME: ${{ github.event.repository.name }} # output of build.yml, keep in sync

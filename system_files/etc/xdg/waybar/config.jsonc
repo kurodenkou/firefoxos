@@ -19,6 +19,7 @@
         "idle_inhibitor",
         "pulseaudio",
         "battery",
+        "custom/updates",
         "custom/notifications",
         "clock"
     ],
@@ -65,6 +66,16 @@
         "all-outputs": false
     },
 
+    // Shown only when an update is downloaded and needs a restart
+    "custom/updates": {
+        "exec": "firox-updates status",
+        "return-type": "json",
+        "interval": 900,
+        "signal": 10,
+        "on-click": "firox-updates restart",
+        "on-click-right": "firox-updates whatsnew",
+        "tooltip": true
+    },
     // Notification history + Do Not Disturb (firox-notifications)
     "custom/notifications": {
         "exec": "firox-notifications status",

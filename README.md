@@ -54,6 +54,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Displays | **Settings → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
 | Mouse and keyboard | **Settings → Mouse**: pointer speed and acceleration, left-handed buttons, double-click speed, pointer size, scroll speed, natural scrolling, and a Touchpad tab (tap to click, two-finger or edge scrolling, right-click method, ignore while typing, off when a mouse is plugged in). **Settings → Keyboard**: repeat delay and rate, Num Lock at login, keyboard layouts with variants and a switching shortcut. Stored by `firox-input` in `~/.config/firox/input.conf`; it writes complete labwc config files to `~/.local/share/firox/xdg/labwc`, which labwc reads after `~/.config/labwc` (so a personal rc.xml still wins). The layout chosen when installing is the default |
 | Notifications | mako pop-ups, plus a bell in the notification area (`firox-notifications`): it shows how many are new and opens a panel with the last 100 notifications (click one to open its app). **Do Not Disturb** (in the panel, or right-click the bell) holds pop-ups except urgent ones. Pop-ups are also held while a screen saver runs |
+| Volume and brightness keys | `firox-osd`: the volume, mute, microphone-mute and brightness keys show a small level popup at the bottom of the screen (also with Do Not Disturb on, and on the lock screen). Volume up unmutes; brightness never goes fully black |
+| Updates | Updates download in the background and apply at the next restart. When one is waiting, an icon appears in the notification area (`firox-updates`): click it to restart, right-click to see which packages change. You also get a notification once per update, and "Firox Linux was updated" after restarting |
 | Clipboard | `firox-clipboard` (cliphist): what you copy stays available after the app you copied it from closes (normally it's lost on Wayland), **Super+V** clipboard history with search and images, never stores items password managers mark as sensitive, cleared at logout by default. **Settings → Clipboard** sets the history size or turns it off. The Command Prompt also takes `Ctrl+Insert` / `Shift+Insert`, and Waydroid shares the clipboard with Android (`python3-pyclip`) |
 | Power saving | **Settings → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
 | Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
@@ -64,6 +66,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 ![Clipboard history (Super+V)](docs/screenshots/clipboard-history.png)
 
 ![Notification panel, Modern and Classic](docs/screenshots/notifications.png)
+
+![Volume and brightness popups, Modern and Classic](docs/screenshots/osd.png)
 
 | Mouse → Touchpad | Keyboard → Layouts |
 |---|---|
@@ -104,7 +108,7 @@ systemctl reboot
 
 ### Fresh install from an ISO
 
-Run **Actions → Build disk images** (`build-disk.yml`) in GitHub and download the `anaconda-iso` artifact, or build one locally:
+Build one locally (this is the usual way), or run **Actions → Build disk images** (`build-disk.yml`, manual only) in GitHub and download the `anaconda-iso` artifact:
 
 ```bash
 just build-iso ghcr.io/kurodenkou/firox latest
@@ -192,7 +196,7 @@ Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskba
 
 ## Building and signing
 
-GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` and `ghcr.io/<owner>/firox-nvidia-open` on every push to `main` and every day. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
+GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` and `ghcr.io/<owner>/firox-nvidia-open` on every push to `main` and every day, and test-builds pull requests. Changes that only touch Markdown or `docs/` don't trigger a build. Disk images (`build-disk.yml`) are only built when started by hand. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
 
 ## Known limitations
 
