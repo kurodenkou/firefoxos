@@ -11,6 +11,8 @@ settings applets.
     firox-control-panel power      open Power Options directly
     firox-control-panel screensaver open Screen Saver directly
     firox-control-panel clipboard  open Clipboard directly
+    firox-control-panel mouse      open Mouse (and touchpad) directly
+    firox-control-panel keyboard   open Keyboard directly
     firox-control-panel accounts   open User Accounts directly
 """
 
@@ -26,7 +28,8 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 # (icon, title, description, argv)
 APPLETS = [
@@ -35,6 +38,8 @@ APPLETS = [
      ["@screensaver"]),
     ("org.kde.plasma.clipboard", "Clipboard", "Copy and paste history (Super+V)", ["@clipboard"]),
     ("preferences-system-power", "Power Options", "Turn off the monitor and sleep when idle", ["@power"]),
+    ("input-mouse", "Mouse", "Pointer speed, buttons, scrolling and touchpad", ["@mouse"]),
+    ("input-keyboard", "Keyboard", "Layouts, repeat speed and Num Lock", ["@keyboard"]),
     ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
      ["pcmanfm-qt", "--profile=firox", "--desktop-pref=background"]),
@@ -394,6 +399,278 @@ class ScreenSaverDialog(Gtk.Dialog):
         wait = int(self.wait.get_active_id() or self.before_wait)
         if sid != self.before_id or wait != self.before_wait:
             subprocess.run(["firox-screensaver", "set", sid, str(wait)])
+
+
+def input_settings():
+    """Current firox-input settings as strings."""
+    values = {}
+    for line in run_text(["firox-input"]).splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            values[k] = v
+    return values
+
+
+def has_touchpad():
+    try:
+        with open("/proc/bus/input/devices") as fh:
+            names = [l.lower() for l in fh if l.startswith("N: Name=")]
+    except OSError:
+        return False
+    return any(w in n for n in names for w in ("touchpad", "trackpad", "glidepoint", "synaptics"))
+
+
+class InputDialog(Gtk.Dialog):
+    """Shared plumbing for the Mouse and Keyboard dialogs (firox-input)."""
+
+    def __init__(self, parent, title, icon, intro):
+        super().__init__(title=title, transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Apply", Gtk.ResponseType.APPLY)
+        self.set_default_size(460, -1)
+        self.before = input_settings()
+        self.values = dict(self.before)
+        box = self.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(14)
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG), False, False, 0)
+        header.pack_start(Gtk.Label(label=intro, xalign=0, wrap=True, max_width_chars=48), True, True, 0)
+        box.pack_start(header, False, False, 0)
+        self.notebook = Gtk.Notebook()
+        box.pack_start(self.notebook, True, True, 0)
+        mine = [p for p in (os.path.expanduser("~/.config/labwc/rc.xml"),
+                            os.path.expanduser("~/.config/labwc/environment")) if os.path.exists(p)]
+        if mine:
+            warn = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+            warn.set_markup("<small>You have your own " + " and ".join(
+                f"<tt>{GLib.markup_escape_text(p.replace(os.path.expanduser('~'), '~'))}</tt>" for p in mine)
+                + ", which takes priority, so some of these settings won't apply. "
+                  "<tt>ujust reset-desktop</tt> removes it (keeping a backup).</small>")
+            box.pack_start(warn, False, False, 0)
+
+    def page(self, title):
+        grid = Gtk.Grid(column_spacing=12, row_spacing=10, border_width=12)
+        grid.row = 0
+        self.notebook.append_page(grid, Gtk.Label(label=title))
+        return grid
+
+    def add_row(self, grid, label, widget, hint=None):
+        if label:
+            grid.attach(Gtk.Label(label=label, xalign=0), 0, grid.row, 1, 1)
+            grid.attach(widget, 1, grid.row, 1, 1)
+        else:
+            grid.attach(widget, 0, grid.row, 2, 1)
+        widget.set_hexpand(True)
+        grid.row += 1
+        if hint:
+            h = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+            h.set_markup(f"<small>{hint}</small>")
+            grid.attach(h, 0, grid.row, 2, 1)
+            grid.row += 1
+
+    def check(self, key, label):
+        b = Gtk.CheckButton(label=label)
+        b.set_active(self.values.get(key) == "1")
+        b.connect("toggled", lambda w: self.values.__setitem__(key, "1" if w.get_active() else "0"))
+        return b
+
+    def slider(self, key, lo, hi, step, left, right, digits=2):
+        box = Gtk.Box(spacing=6)
+        adj = Gtk.Adjustment(value=float(self.values.get(key, lo)), lower=lo, upper=hi,
+                             step_increment=step, page_increment=step * 4)
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj, draw_value=False)
+        scale.set_size_request(200, -1)
+        scale.connect("value-changed",
+                      lambda w: self.values.__setitem__(key, f"{round(w.get_value(), digits):g}"))
+        box.pack_start(Gtk.Label(label=left), False, False, 0)
+        box.pack_start(scale, True, True, 0)
+        box.pack_start(Gtk.Label(label=right), False, False, 0)
+        return box
+
+    def combo(self, key, options):
+        c = Gtk.ComboBoxText()
+        for value, label in options:
+            c.append(value, label)
+        c.set_active_id(self.values.get(key))
+        if c.get_active_id() is None:
+            c.set_active(0)
+        c.connect("changed", lambda w: self.values.__setitem__(key, w.get_active_id()))
+        return c
+
+    def apply(self):
+        changed = [f"{k}={v}" for k, v in self.values.items() if self.before.get(k) != v]
+        if changed:
+            subprocess.run(["firox-input", "set"] + changed)
+
+
+class MouseDialog(InputDialog):
+    def __init__(self, parent):
+        super().__init__(parent, "Mouse", "input-mouse",
+                         "Changes take effect as soon as you click Apply.")
+        g = self.page("Buttons")
+        self.add_row(g, None, self.check("LEFT_HANDED", "Switch primary and secondary buttons (left-handed)"))
+        self.add_row(g, "Double-click speed:", self.slider("DOUBLE_CLICK", 200, 900, 50, "Fast", "Slow", 0),
+                     "Double-click the folder below to test the setting.")
+        test = Gtk.EventBox()
+        self.folder = Gtk.Image.new_from_icon_name("folder", Gtk.IconSize.DIALOG)
+        self.folder.set_pixel_size(48)
+        test.add(self.folder)
+        test.connect("button-press-event", self.on_test_click)
+        self.add_row(g, None, test)
+
+        g = self.page("Pointer")
+        self.add_row(g, "Speed:", self.slider("MOUSE_SPEED", -1, 1, 0.1, "Slow", "Fast"))
+        self.add_row(g, None, self.check("MOUSE_ACCEL", "Enhance pointer precision (acceleration)"))
+        self.add_row(g, "Pointer size:", self.combo("CURSOR_SIZE", [("24", "Normal"), ("32", "Large"),
+                                                                     ("48", "Extra large"), ("64", "Huge")]),
+                     "Some apps use the new size after they're restarted.")
+
+        g = self.page("Wheel")
+        self.add_row(g, "Scrolling speed:", self.slider("SCROLL_SPEED", 0.25, 3, 0.25, "Slow", "Fast"))
+        self.add_row(g, None, self.check("MOUSE_NATURAL", "Natural scrolling (content follows the wheel)"))
+
+        g = self.page("Touchpad")
+        if not has_touchpad():
+            self.add_row(g, None, Gtk.Label(label="No touchpad was found; these settings apply when one is "
+                                                  "connected.", xalign=0, wrap=True, max_width_chars=50))
+        self.add_row(g, None, self.check("TOUCHPAD_TAP", "Tap to click"))
+        self.add_row(g, "Speed:", self.slider("TOUCHPAD_SPEED", -1, 1, 0.1, "Slow", "Fast"))
+        self.add_row(g, None, self.check("TOUCHPAD_NATURAL", "Natural scrolling"))
+        self.add_row(g, "Scroll with:", self.combo("TOUCHPAD_SCROLL", [("twofinger", "Two fingers"),
+                                                                       ("edge", "The edge of the touchpad")]))
+        self.add_row(g, "Right-click:", self.combo("TOUCHPAD_CLICK", [
+            ("auto", "Touchpad default"), ("clickfinger", "Click with two fingers"),
+            ("buttonAreas", "Click the bottom-right corner")]))
+        self.add_row(g, None, self.check("TOUCHPAD_DWT", "Ignore the touchpad while typing"))
+        self.add_row(g, None, self.check("TOUCHPAD_OFF_WITH_MOUSE", "Turn off the touchpad when a mouse is plugged in"))
+        self.show_all()
+
+    def on_test_click(self, _w, event):
+        if event.type == Gdk.EventType._2BUTTON_PRESS:
+            name = "folder-open" if self.folder.get_icon_name()[0] == "folder" else "folder"
+            self.folder.set_from_icon_name(name, Gtk.IconSize.DIALOG)
+            self.folder.set_pixel_size(48)
+        return False
+
+
+class KeyboardDialog(InputDialog):
+    def __init__(self, parent):
+        super().__init__(parent, "Keyboard", "input-keyboard",
+                         "Changes take effect as soon as you click Apply.")
+        g = self.page("Speed")
+        self.add_row(g, "Repeat delay:", self.slider("REPEAT_DELAY", 150, 1000, 50, "Short", "Long", 0))
+        self.add_row(g, "Repeat rate:", self.slider("REPEAT_RATE", 5, 60, 1, "Slow", "Fast", 0))
+        test = Gtk.Entry(placeholder_text="Click here and hold down a key to test the repeat rate")
+        self.add_row(g, None, test, "The new speed applies after you click Apply.")
+        self.add_row(g, None, self.check("NUMLOCK", "Turn on Num Lock when I log in"))
+
+        g = self.page("Layouts")
+        self.layout_names = dict(l.split("\t", 1) for l in run_text(["firox-input", "layouts"]).splitlines()
+                                 if "\t" in l)
+        layouts = [x for x in self.values.get("KB_LAYOUTS", "").split(",") if x]
+        variants = self.values.get("KB_VARIANTS", "").split(",")
+        self.store = Gtk.ListStore(str, str, str)  # code, variant, label
+        for i, code in enumerate(layouts):
+            var = variants[i] if i < len(variants) else ""
+            self.store.append([code, var, self.label(code, var)])
+        view = Gtk.TreeView(model=self.store, headers_visible=False)
+        view.append_column(Gtk.TreeViewColumn("Layout", Gtk.CellRendererText(), text=2))
+        self.selection = view.get_selection()
+        scroll = Gtk.ScrolledWindow(min_content_height=110)
+        scroll.set_shadow_type(Gtk.ShadowType.IN)
+        scroll.add(view)
+        self.empty_hint = ("The layout chosen when Firox Linux was installed is used. "
+                           "Add layouts to use your own instead; the first one is the default.")
+        self.add_row(g, None, scroll, self.empty_hint)
+
+        buttons = Gtk.Box(spacing=6)
+        for label, handler in (("Add…", self.on_add), ("Remove", self.on_remove),
+                               ("Move up", self.on_up)):
+            b = Gtk.Button(label=label)
+            b.connect("clicked", handler)
+            buttons.pack_start(b, False, False, 0)
+        self.add_row(g, None, buttons)
+        keys = [l.split("\t", 1) for l in run_text(["firox-input", "switch-keys"]).splitlines() if "\t" in l]
+        common = ["grp:alt_shift_toggle", "grp:win_space_toggle", "grp:ctrl_shift_toggle",
+                  "grp:caps_toggle", "grp:alt_space_toggle"]
+        keys.sort(key=lambda kv: (common.index(kv[0]) if kv[0] in common else 99, kv[1]))
+        self.add_row(g, "Switch layouts with:", self.combo("KB_SWITCH", keys or [("grp:alt_shift_toggle", "Alt+Shift")]))
+        self.show_all()
+
+    def label(self, code, variant):
+        name = self.layout_names.get(code, code)
+        if variant:
+            for line in run_text(["firox-input", "variants", code]).splitlines():
+                v, _t, vname = line.partition("\t")
+                if v == variant:
+                    return vname
+            return f"{name} ({variant})"
+        return name
+
+    def sync_store(self):
+        rows = [(r[0], r[1]) for r in self.store]
+        self.values["KB_LAYOUTS"] = ",".join(c for c, _v in rows)
+        self.values["KB_VARIANTS"] = ",".join(v for _c, v in rows) if any(v for _c, v in rows) else ""
+
+    def on_add(self, _b):
+        dlg = Gtk.Dialog(title="Add a keyboard layout", transient_for=self, modal=True)
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button("Add", Gtk.ResponseType.OK)
+        dlg.set_default_size(380, 420)
+        area = dlg.get_content_area()
+        area.set_spacing(8)
+        area.set_border_width(12)
+        search = Gtk.SearchEntry(placeholder_text="Search layouts")
+        area.pack_start(search, False, False, 0)
+        store = Gtk.ListStore(str, str, str)  # code, variant, label
+        for code, name in sorted(self.layout_names.items(), key=lambda kv: kv[1]):
+            store.append([code, "", name])
+        filt = store.filter_new()
+        filt.set_visible_func(lambda m, it, _d: search.get_text().lower() in m[it][2].lower())
+        search.connect("search-changed", lambda _s: filt.refilter())
+        view = Gtk.TreeView(model=filt, headers_visible=False)
+        view.append_column(Gtk.TreeViewColumn("Layout", Gtk.CellRendererText(), text=2))
+        view.connect("row-activated", lambda *_: dlg.response(Gtk.ResponseType.OK))
+        scroll = Gtk.ScrolledWindow(vexpand=True)
+        scroll.add(view)
+        area.pack_start(scroll, True, True, 0)
+        variant = Gtk.ComboBoxText()
+        area.pack_start(Gtk.Label(label="Variant:", xalign=0), False, False, 0)
+        area.pack_start(variant, False, False, 0)
+
+        def on_select(sel):
+            model, it = sel.get_selected()
+            variant.remove_all()
+            variant.append("", "Standard")
+            if it is not None:
+                for line in run_text(["firox-input", "variants", model[it][0]]).splitlines():
+                    v, _t, name = line.partition("\t")
+                    variant.append(v, name)
+            variant.set_active(0)
+        view.get_selection().connect("changed", on_select)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            model, it = view.get_selection().get_selected()
+            if it is not None:
+                code, var = model[it][0], variant.get_active_id() or ""
+                self.store.append([code, var, self.label(code, var)])
+                self.sync_store()
+        dlg.destroy()
+
+    def on_remove(self, _b):
+        model, it = self.selection.get_selected()
+        if it is not None:
+            model.remove(it)
+            self.sync_store()
+
+    def on_up(self, _b):
+        model, it = self.selection.get_selected()
+        if it is not None:
+            prev = model.iter_previous(it)
+            if prev is not None:
+                model.swap(it, prev)
+                self.sync_store()
 
 
 class ClipboardDialog(Gtk.Dialog):
@@ -778,6 +1055,11 @@ class ControlPanel(Gtk.ApplicationWindow):
             if dlg.run() == Gtk.ResponseType.APPLY:
                 dlg.apply()
             dlg.destroy()
+        elif argv in (["@mouse"], ["@keyboard"]):
+            dlg = (MouseDialog if argv == ["@mouse"] else KeyboardDialog)(self)
+            if dlg.run() == Gtk.ResponseType.APPLY:
+                dlg.apply()
+            dlg.destroy()
         elif argv == ["@clipboard"]:
             dlg = ClipboardDialog(self)
             if dlg.run() == Gtk.ResponseType.APPLY:
@@ -818,6 +1100,7 @@ class App(Gtk.Application):
         direct = {"system": ["@system"], "datetime": ["@datetime"], "appearance": ["@appearance"],
                   "accounts": ["@accounts"], "power": ["@power"],
                   "screensaver": ["@screensaver"], "clipboard": ["@clipboard"],
+                  "mouse": ["@mouse"], "keyboard": ["@keyboard"],
                   "display": ["firox-display"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
@@ -826,7 +1109,8 @@ class App(Gtk.Application):
                 cls = {"system": SystemDialog, "datetime": DateTimeDialog,
                        "appearance": AppearanceDialog, "accounts": AccountsDialog,
                        "power": PowerDialog, "screensaver": ScreenSaverDialog,
-                       "clipboard": ClipboardDialog}[page]
+                       "clipboard": ClipboardDialog,
+                       "mouse": MouseDialog, "keyboard": KeyboardDialog}[page]
                 dlg = cls(None)
                 if dlg.run() == Gtk.ResponseType.APPLY:
                     dlg.apply()

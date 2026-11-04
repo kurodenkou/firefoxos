@@ -1,0 +1,343 @@
+#!/usr/bin/python3
+"""
+firox-input: mouse, touchpad and keyboard settings for the Firox desktop.
+
+    firox-input                      show the settings
+    firox-input get KEY              print one setting
+    firox-input set KEY=VALUE...     change settings and apply them now
+    firox-input reset                go back to the defaults
+    firox-input apply [--no-reload]  rebuild labwc's config (run at login)
+    firox-input layouts              list keyboard layouts (code<TAB>name)
+    firox-input variants LAYOUT      list a layout's variants
+    firox-input switch-keys          list layout switching shortcuts
+
+Settings are kept in ~/.config/firox/input.conf (defaults: /etc/firox/input.conf).
+labwc reads only the first rc.xml and environment file it finds, so this writes
+complete copies, the system ones plus these settings, to
+~/.local/share/firox/xdg/labwc/. firox-session puts that folder in
+XDG_CONFIG_DIRS, after ~/.config but before /etc/xdg, so a personal
+~/.config/labwc/rc.xml (or environment) still wins.
+"""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+HOME = os.path.expanduser("~")
+CFG = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share")
+USER_CONF = os.path.join(CFG, "firox", "input.conf")
+SYS_CONF = "/etc/firox/input.conf"
+OUT_DIR = os.path.join(DATA, "firox", "xdg", "labwc")
+SYS_LABWC = "/etc/xdg/labwc"
+XKB_LIST = "/usr/share/X11/xkb/rules/evdev.lst"
+SYS_KEYBOARD = "/etc/X11/xorg.conf.d/00-keyboard.conf"   # written by localectl / the installer
+
+# key: (type, default)
+SETTINGS = {
+    "MOUSE_SPEED": (float, 0.0),          # -1 .. 1
+    "MOUSE_ACCEL": (bool, True),          # pointer acceleration
+    "MOUSE_NATURAL": (bool, False),       # natural (reversed) scrolling
+    "LEFT_HANDED": (bool, False),         # swap left and right buttons
+    "DOUBLE_CLICK": (int, 500),           # ms
+    "SCROLL_SPEED": (float, 1.0),         # wheel scroll factor
+    "CURSOR_SIZE": (int, 24),
+    "TOUCHPAD_TAP": (bool, True),
+    "TOUCHPAD_NATURAL": (bool, False),
+    "TOUCHPAD_SPEED": (float, 0.0),
+    "TOUCHPAD_DWT": (bool, True),         # ignore the touchpad while typing
+    "TOUCHPAD_SCROLL": (str, "twofinger"),  # twofinger | edge
+    "TOUCHPAD_CLICK": (str, "auto"),      # auto | clickfinger | buttonAreas
+    "TOUCHPAD_OFF_WITH_MOUSE": (bool, False),
+    "KB_LAYOUTS": (str, ""),              # e.g. "us,de"; empty = the system layout
+    "KB_VARIANTS": (str, ""),             # e.g. ",nodeadkeys"
+    "KB_SWITCH": (str, "grp:alt_shift_toggle"),
+    "REPEAT_DELAY": (int, 600),           # ms
+    "REPEAT_RATE": (int, 25),             # per second
+    "NUMLOCK": (bool, False),
+}
+CHOICES = {"TOUCHPAD_SCROLL": ("twofinger", "edge"),
+           "TOUCHPAD_CLICK": ("auto", "clickfinger", "buttonAreas")}
+RANGES = {"MOUSE_SPEED": (-1, 1), "TOUCHPAD_SPEED": (-1, 1), "SCROLL_SPEED": (0.1, 10),
+          "DOUBLE_CLICK": (100, 2000), "CURSOR_SIZE": (16, 128),
+          "REPEAT_DELAY": (100, 2000), "REPEAT_RATE": (1, 100)}
+
+
+def read_kv(path):
+    out = {}
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def parse(key, raw):
+    kind, default = SETTINGS[key]
+    if kind is bool:
+        if raw.lower() in ("1", "yes", "true", "on"):
+            return True
+        if raw.lower() in ("0", "no", "false", "off"):
+            return False
+        raise ValueError(f"{key} must be 1 or 0")
+    if kind in (int, float):
+        value = kind(float(raw)) if kind is int else float(raw)
+        lo, hi = RANGES.get(key, (None, None))
+        if lo is not None and not lo <= value <= hi:
+            raise ValueError(f"{key} must be between {lo} and {hi}")
+        return value
+    if key in CHOICES and raw not in CHOICES[key]:
+        raise ValueError(f"{key} must be one of: {', '.join(CHOICES[key])}")
+    if not re.fullmatch(r"[A-Za-z0-9_:,()+-]*", raw):
+        raise ValueError(f"{key}: unexpected characters")
+    return raw
+
+
+def load():
+    values = {k: d for k, (_t, d) in SETTINGS.items()}
+    for path in (SYS_CONF, USER_CONF):
+        for k, raw in read_kv(path).items():
+            if k in SETTINGS:
+                try:
+                    values[k] = parse(k, raw)
+                except ValueError:
+                    pass
+    return values
+
+
+def fmt(value):
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def yesno(b):
+    return "yes" if b else "no"
+
+
+def system_keyboard():
+    """The layout chosen in the installer / localectl, as (layouts, variants, options)."""
+    text = ""
+    try:
+        with open(SYS_KEYBOARD) as fh:
+            text = fh.read()
+    except OSError:
+        pass
+    found = dict(re.findall(r'Option\s+"Xkb(Layout|Variant|Options)"\s+"([^"]*)"', text))
+    return found.get("Layout", ""), found.get("Variant", ""), found.get("Options", "")
+
+
+def keyboard_env(v):
+    sys_layout, sys_variant, sys_options = system_keyboard()
+    layouts, variants = v["KB_LAYOUTS"], v["KB_VARIANTS"]
+    if not layouts:
+        layouts, variants = sys_layout, sys_variant
+    env = {}
+    if layouts:
+        env["XKB_DEFAULT_LAYOUT"] = layouts
+        if variants.strip(","):
+            env["XKB_DEFAULT_VARIANT"] = variants
+    options = [o for o in sys_options.split(",") if o and not o.startswith("grp:")]
+    if "," in layouts and v["KB_SWITCH"]:
+        options.append(v["KB_SWITCH"])
+    if options:
+        env["XKB_DEFAULT_OPTIONS"] = ",".join(options)
+    return env
+
+
+def set_child(parent, tag, text):
+    el = parent.find(tag)
+    if el is None:
+        el = ET.SubElement(parent, tag)
+    el.text = text
+    return el
+
+
+def build_rc(v):
+    tree = ET.parse(os.path.join(SYS_LABWC, "rc.xml"))
+    root = tree.getroot()
+
+    for old in root.findall("libinput"):
+        root.remove(old)
+    libinput = ET.SubElement(root, "libinput")
+
+    def device(category, speed, natural, accel=True):
+        d = ET.SubElement(libinput, "device", category=category)
+        set_child(d, "naturalScroll", yesno(natural))
+        set_child(d, "leftHanded", yesno(v["LEFT_HANDED"]))
+        set_child(d, "pointerSpeed", f"{speed:.2f}")
+        set_child(d, "accelProfile", "adaptive" if accel else "flat")
+        return d
+
+    mouse = device("non-touch", v["MOUSE_SPEED"], v["MOUSE_NATURAL"], v["MOUSE_ACCEL"])
+    set_child(mouse, "scrollFactor", f"{v['SCROLL_SPEED']:g}")
+    pad = device("touchpad", v["TOUCHPAD_SPEED"], v["TOUCHPAD_NATURAL"])
+    set_child(pad, "tap", yesno(v["TOUCHPAD_TAP"]))
+    set_child(pad, "disableWhileTyping", yesno(v["TOUCHPAD_DWT"]))
+    set_child(pad, "scrollMethod", v["TOUCHPAD_SCROLL"])
+    if v["TOUCHPAD_CLICK"] != "auto":
+        set_child(pad, "clickMethod", v["TOUCHPAD_CLICK"])
+    if v["TOUCHPAD_OFF_WITH_MOUSE"]:
+        set_child(pad, "sendEventsMode", "disabledOnExternalMouse")
+    # Anything else (trackpoints, trackballs): same as the mouse
+    device("default", v["MOUSE_SPEED"], v["MOUSE_NATURAL"], v["MOUSE_ACCEL"])
+
+    keyboard = root.find("keyboard")
+    if keyboard is None:
+        keyboard = ET.SubElement(root, "keyboard")
+    set_child(keyboard, "repeatRate", str(v["REPEAT_RATE"]))
+    set_child(keyboard, "repeatDelay", str(v["REPEAT_DELAY"]))
+    set_child(keyboard, "numlock", "on" if v["NUMLOCK"] else "off")
+
+    mouse_el = root.find("mouse")
+    if mouse_el is None:
+        mouse_el = ET.SubElement(root, "mouse")
+    set_child(mouse_el, "doubleClickTime", str(v["DOUBLE_CLICK"]))
+
+    ET.indent(tree, "  ")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<!-- Generated by firox-input from /etc/xdg/labwc/rc.xml and your Mouse /\n"
+            "     Keyboard settings. Edits are overwritten at login; for your own\n"
+            "     changes, use ~/.config/labwc/rc.xml (`ujust customize-desktop`). -->\n"
+            + ET.tostring(root, encoding="unicode") + "\n")
+
+
+def build_env(v):
+    ours = keyboard_env(v)
+    ours["XCURSOR_SIZE"] = str(v["CURSOR_SIZE"])
+    lines = ["# Generated by firox-input: /etc/xdg/labwc/environment plus your",
+             "# keyboard layout and cursor size. Overwritten at login."]
+    try:
+        with open(os.path.join(SYS_LABWC, "environment")) as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                key = line.split("=", 1)[0].strip()
+                if line.startswith("#") or not line.strip() or key in ours or key.startswith("XKB_DEFAULT_"):
+                    continue
+                lines.append(line)
+    except OSError:
+        pass
+    lines += [f"{k}={val}" for k, val in ours.items()]
+    return "\n".join(lines) + "\n"
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as fh:
+        fh.write(text)
+    os.replace(path + ".tmp", path)
+
+
+def gsettings(schema, key, value):
+    if shutil.which("gsettings"):
+        subprocess.run(["gsettings", "set", schema, key, value],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def apply(reload=True):
+    v = load()
+    try:
+        write(os.path.join(OUT_DIR, "rc.xml"), build_rc(v))
+    except (OSError, ET.ParseError) as err:
+        print(f"firox-input: couldn't build rc.xml: {err}", file=sys.stderr)
+    write(os.path.join(OUT_DIR, "environment"), build_env(v))
+    # GTK apps: double-click time and cursor size
+    gsettings("org.gnome.desktop.peripherals.mouse", "double-click", str(v["DOUBLE_CLICK"]))
+    gsettings("org.gnome.desktop.interface", "cursor-size", str(v["CURSOR_SIZE"]))
+    if reload and os.environ.get("LABWC_PID"):
+        subprocess.run(["labwc", "--reconfigure"], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=False)
+
+
+def overridden():
+    """Personal labwc files that win over the generated ones."""
+    return [p for p in (os.path.join(CFG, "labwc", "rc.xml"), os.path.join(CFG, "labwc", "environment"))
+            if os.path.exists(p)]
+
+
+def xkb_section(name):
+    out, inside = [], False
+    try:
+        with open(XKB_LIST) as fh:
+            for line in fh:
+                if line.startswith("!"):
+                    inside = line.strip() == f"! {name}"
+                    continue
+                if inside and line.strip():
+                    code, _sp, desc = line.strip().partition(" ")
+                    out.append((code, desc.strip()))
+    except OSError:
+        pass
+    return out
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "show"
+    if cmd == "show":
+        v = load()
+        for k in SETTINGS:
+            print(f"{k}={fmt(v[k])}")
+        env = keyboard_env(v)
+        print(f"# keyboard: {env.get('XKB_DEFAULT_LAYOUT', 'us')} {env.get('XKB_DEFAULT_VARIANT', '')}".rstrip())
+        for p in overridden():
+            print(f"# note: {p} overrides these settings")
+        return 0
+    if cmd == "get" and len(argv) > 2 and argv[2] in SETTINGS:
+        print(fmt(load()[argv[2]]))
+        return 0
+    if cmd == "set" and len(argv) > 2:
+        current = read_kv(USER_CONF)
+        for kv in argv[2:]:
+            k, _eq, raw = kv.partition("=")
+            if k not in SETTINGS:
+                print(f"firox-input: unknown setting {k}", file=sys.stderr)
+                return 2
+            try:
+                current[k] = fmt(parse(k, raw))
+            except ValueError as err:
+                print(f"firox-input: {err}", file=sys.stderr)
+                return 2
+        write(USER_CONF, "".join(f"{k}={val}\n" for k, val in current.items() if k in SETTINGS))
+        apply()
+        return 0
+    if cmd == "reset":
+        try:
+            os.remove(USER_CONF)
+        except OSError:
+            pass
+        apply()
+        return 0
+    if cmd == "apply":
+        apply(reload="--no-reload" not in argv)
+        return 0
+    if cmd == "layouts":
+        for code, desc in sorted(xkb_section("layout"), key=lambda x: x[1]):
+            print(f"{code}\t{desc}")
+        return 0
+    if cmd == "variants" and len(argv) > 2:
+        for code, desc in xkb_section("variant"):
+            layout, _c, name = desc.partition(": ")
+            if layout == argv[2]:
+                print(f"{code}\t{name}")
+        return 0
+    if cmd == "switch-keys":
+        for code, desc in xkb_section("option"):
+            if code.startswith("grp:") and code.endswith("toggle"):
+                print(f"{code}\t{desc}")
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
