@@ -1,0 +1,77 @@
+#!/usr/bin/bash
+# firox-osd: volume / brightness keys with an on-screen popup.
+#
+#   firox-osd volume up|down|mute     change the speaker volume
+#   firox-osd mic mute                mute or unmute the microphone
+#   firox-osd brightness up|down      change the screen brightness
+#   firox-osd volume|brightness       just show the current level
+#
+# The popup is a mako notification (app name "firox-osd", styled in the
+# theme's mako.conf: bottom-centre with a level bar). Each one replaces the
+# last, it's marked transient so it isn't kept in the notification history,
+# and it shows even with Do Not Disturb on.
+set -u
+
+STEP=5
+
+show() { # show ICON TEXT [PERCENT]
+    # The synchronous hint makes each popup replace the previous one.
+    # (Don't also pass --replace-id: mako crashes when it gets both.)
+    local args=(-a firox-osd -i "$1" -t 1500 -e -h string:x-canonical-private-synchronous:firox-osd)
+    [ -n "${3:-}" ] && args+=(-h "int:value:$3")
+    notify-send "${args[@]}" "$2" 2>/dev/null
+}
+
+volume() {
+    local sink=@DEFAULT_AUDIO_SINK@ out pct icon
+    case "${1:-}" in
+        up)   wpctl set-mute "$sink" 0; wpctl set-volume -l 1.0 "$sink" "$STEP%+" ;;
+        down) wpctl set-volume "$sink" "$STEP%-" ;;
+        mute) wpctl set-mute "$sink" toggle ;;
+    esac
+    out="$(wpctl get-volume "$sink" 2>/dev/null)" || { show audio-volume-muted "No sound device"; return; }
+    pct="$(awk '{printf "%d", $2 * 100 + 0.5}' <<<"$out")"
+    if [[ "$out" == *MUTED* ]]; then
+        show audio-volume-muted "Muted" 0
+        return
+    fi
+    if [ "$pct" -eq 0 ]; then icon=audio-volume-muted
+    elif [ "$pct" -lt 34 ]; then icon=audio-volume-low
+    elif [ "$pct" -lt 67 ]; then icon=audio-volume-medium
+    else icon=audio-volume-high
+    fi
+    show "$icon" "Volume $pct%" "$pct"
+}
+
+mic() {
+    local src=@DEFAULT_AUDIO_SOURCE@ out
+    [ "${1:-}" = mute ] && wpctl set-mute "$src" toggle
+    out="$(wpctl get-volume "$src" 2>/dev/null)" || { show microphone-sensitivity-muted "No microphone"; return; }
+    if [[ "$out" == *MUTED* ]]; then
+        show microphone-sensitivity-muted "Microphone off"
+    else
+        show microphone-sensitivity-high "Microphone on"
+    fi
+}
+
+brightness() {
+    local pct
+    case "${1:-}" in
+        # Never all the way to 0: a black screen looks like it's off
+        up)   brightnessctl -q set "$STEP%+" ;;
+        down) brightnessctl -q --min-value=1 set "$STEP%-" ;;
+    esac
+    pct="$(brightnessctl -m 2>/dev/null | head -n1 | cut -d, -f4 | tr -d '%')"
+    if [ -z "$pct" ]; then
+        show display-brightness "This screen's brightness can't be changed here"
+        return
+    fi
+    show display-brightness "Brightness $pct%" "$pct"
+}
+
+case "${1:-}" in
+    volume)     volume "${2:-}" ;;
+    mic)        mic "${2:-}" ;;
+    brightness) brightness "${2:-}" ;;
+    *)          sed -n '2,7s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac

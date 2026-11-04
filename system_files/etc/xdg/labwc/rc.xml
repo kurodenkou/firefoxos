@@ -93,14 +93,18 @@
     <keybind key="S-Print"><action name="Execute" command="firox-open screenshot-region" /></keybind>
 
     <!-- Media / hardware keys -->
-    <keybind key="XF86AudioRaiseVolume"><action name="Execute" command="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+" /></keybind>
-    <keybind key="XF86AudioLowerVolume"><action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" /></keybind>
-    <keybind key="XF86AudioMute"><action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" /></keybind>
-    <keybind key="XF86AudioPlay"><action name="Execute" command="playerctl play-pause" /></keybind>
-    <keybind key="XF86AudioNext"><action name="Execute" command="playerctl next" /></keybind>
-    <keybind key="XF86AudioPrev"><action name="Execute" command="playerctl previous" /></keybind>
-    <keybind key="XF86MonBrightnessUp"><action name="Execute" command="brightnessctl set 5%+" /></keybind>
-    <keybind key="XF86MonBrightnessDown"><action name="Execute" command="brightnessctl set 5%-" /></keybind>
+    <!-- Volume and brightness keys, with an on-screen popup (firox-osd).
+         They also work on the lock screen. -->
+    <keybind key="XF86AudioRaiseVolume" allowWhenLocked="yes"><action name="Execute" command="firox-osd volume up" /></keybind>
+    <keybind key="XF86AudioLowerVolume" allowWhenLocked="yes"><action name="Execute" command="firox-osd volume down" /></keybind>
+    <keybind key="XF86AudioMute" allowWhenLocked="yes"><action name="Execute" command="firox-osd volume mute" /></keybind>
+    <keybind key="XF86AudioMicMute" allowWhenLocked="yes"><action name="Execute" command="firox-osd mic mute" /></keybind>
+    <keybind key="XF86AudioPlay" allowWhenLocked="yes"><action name="Execute" command="playerctl play-pause" /></keybind>
+    <keybind key="XF86AudioPause" allowWhenLocked="yes"><action name="Execute" command="playerctl pause" /></keybind>
+    <keybind key="XF86AudioNext" allowWhenLocked="yes"><action name="Execute" command="playerctl next" /></keybind>
+    <keybind key="XF86AudioPrev" allowWhenLocked="yes"><action name="Execute" command="playerctl previous" /></keybind>
+    <keybind key="XF86MonBrightnessUp" allowWhenLocked="yes"><action name="Execute" command="firox-osd brightness up" /></keybind>
+    <keybind key="XF86MonBrightnessDown" allowWhenLocked="yes"><action name="Execute" command="firox-osd brightness down" /></keybind>
   </keyboard>
 
   <mouse>

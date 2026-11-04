@@ -1,0 +1,214 @@
+#!/usr/bin/python3
+"""
+firox-updates: tell the user when an update is ready and what changed.
+
+Firox Linux downloads updates in the background (rpm-ostreed-automatic,
+policy "stage"); they take effect at the next restart. This shows that:
+
+    firox-updates status      JSON for the taskbar icon (waybar): an icon
+                              appears when an update is waiting for a restart,
+                              and a notification is sent once per update
+    firox-updates restart     the Turn Off dialog, to restart now
+    firox-updates whatsnew    what changes in the waiting update (or, if none
+                              is waiting, what changed in the last update)
+    firox-updates login       at login: "Firox Linux was updated" once after
+                              an update was applied
+    firox-updates check       print the update state
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
+NOTIFIED = os.path.join(STATE, "update-notified")      # checksum of the staged update we told about
+LAST_BOOTED = os.path.join(STATE, "last-booted-version")
+ICON = ""   # Font Awesome "arrows-rotate"
+
+
+def run(argv, timeout=30):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def deployments():
+    r = run(["rpm-ostree", "status", "--json"])
+    if r is None or r.returncode != 0:
+        return []
+    try:
+        return json.loads(r.stdout).get("deployments", [])
+    except ValueError:
+        return []
+
+
+def version(d):
+    if not d:
+        return ""
+    return d.get("version") or (d.get("checksum") or "")[:10]
+
+
+def state():
+    """(booted, pending, previous) deployments; pending is None if nothing waits."""
+    deps = deployments()
+    booted = next((d for d in deps if d.get("booted")), None)
+    pending = deps[0] if deps and not deps[0].get("booted") else None
+    previous = None
+    if booted is not None:
+        later = deps[deps.index(booted) + 1:]
+        previous = later[0] if later else None
+    return booted, pending, previous
+
+
+def read(path):
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def write(path, text):
+    os.makedirs(STATE, exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(text + "\n")
+
+
+def detached(argv):
+    subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def status():
+    booted, pending, _prev = state()
+    if pending is None:
+        print(json.dumps({"text": "", "class": "none"}))
+        return
+    new = version(pending)
+    print(json.dumps({
+        "text": ICON,
+        "class": "pending",
+        "tooltip": f"Restart to finish updating Firox Linux\n{version(booted)} → {new}\n"
+                   "Click to restart. Right-click to see what's new.",
+    }))
+    key = pending.get("checksum") or new
+    if read(NOTIFIED) != key:
+        write(NOTIFIED, key)
+        detached([sys.argv[0], "_notify-pending", new])
+
+
+def notify(summary, body, action_label, then):
+    """A notification whose click (mako's default action) runs `then`."""
+    r = run(["notify-send", "-a", "System Update", "-i", "system-software-update",
+             "-A", f"default={action_label}", summary, body], timeout=24 * 3600)
+    if r is not None and r.stdout.strip() == "default":
+        detached(then)
+
+
+def restart():
+    detached(["firox-startmenu", "--power"])
+
+
+def diff_text(old, new):
+    if not old or not new:
+        return ""
+    r = run(["rpm-ostree", "db", "diff", old.get("checksum", ""), new.get("checksum", "")], timeout=120)
+    if r is None or r.returncode != 0:
+        return ""
+    return r.stdout.strip()
+
+
+def whatsnew():
+    booted, pending, previous = state()
+    if pending is not None:
+        title = "Update ready to install"
+        intro = (f"Firox Linux {version(pending)} has been downloaded and will be installed when you "
+                 f"restart (you're on {version(booted)}).")
+        text = diff_text(booted, pending)
+    elif previous is not None and booted is not None:
+        title = "What's new"
+        intro = f"You're on Firox Linux {version(booted)}. Changes since {version(previous)}:"
+        text = diff_text(previous, booted)
+    else:
+        title = "What's new"
+        intro = f"You're on Firox Linux {version(booted) or 'an unknown version'}. No earlier version to compare with."
+        text = ""
+    show_window(title, intro, text or "The list of changed packages isn't available.", pending is not None)
+
+
+def show_window(title, intro, text, can_restart):
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+
+    win = Gtk.Dialog(title=title)
+    win.set_default_size(560, 480)
+    win.set_icon_name("system-software-update")
+    if can_restart:
+        win.add_button("Restart now", 1)
+    win.add_button("Close", Gtk.ResponseType.CLOSE)
+    box = win.get_content_area()
+    box.set_spacing(10)
+    box.set_border_width(14)
+    head = Gtk.Box(spacing=12)
+    img = Gtk.Image.new_from_icon_name("system-software-update", Gtk.IconSize.DIALOG)
+    head.pack_start(img, False, False, 0)
+    label = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+    label.set_text(intro)
+    head.pack_start(label, True, True, 0)
+    box.pack_start(head, False, False, 0)
+    view = Gtk.TextView(editable=False, cursor_visible=False, monospace=True,
+                        left_margin=8, top_margin=6, bottom_margin=6)
+    view.get_buffer().set_text(text)
+    scroll = Gtk.ScrolledWindow(vexpand=True)
+    scroll.set_shadow_type(Gtk.ShadowType.IN)
+    scroll.add(view)
+    box.pack_start(scroll, True, True, 0)
+    win.show_all()
+    if win.run() == 1:
+        restart()
+    win.destroy()
+
+
+def login():
+    """Once after an update was applied: say so."""
+    booted, _pending, previous = state()
+    if booted is None:
+        return
+    now = version(booted)
+    last = read(LAST_BOOTED)
+    write(LAST_BOOTED, now)
+    if last and last != now:
+        notify("Firox Linux was updated", f"You're now on {now}. Click to see what's new.",
+               "What's new", [sys.argv[0], "whatsnew"])
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "check"
+    if cmd == "status":
+        status()
+    elif cmd == "_notify-pending":
+        notify("Restart to finish updating",
+               f"Firox Linux {argv[2] if len(argv) > 2 else ''} is ready. "
+               "Restart when it suits you; click to restart now.".replace("  ", " "),
+               "Restart now", [argv[0], "restart"])
+    elif cmd == "restart":
+        restart()
+    elif cmd == "whatsnew":
+        whatsnew()
+    elif cmd == "login":
+        login()
+    elif cmd == "check":
+        booted, pending, _prev = state()
+        print(f"running: {version(booted) or 'unknown'}")
+        print(f"waiting for restart: {version(pending) if pending else 'nothing'}")
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

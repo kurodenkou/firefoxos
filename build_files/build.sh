@@ -106,6 +106,7 @@ PACKAGES=(
 
     # --- Look & feel ---
     papirus-icon-theme
+    papirus-icon-theme-dark      # light icons for Modern's dark pop-ups and Run dialog
     breeze-cursor-theme
     adw-gtk3-theme
     dejavu-sans-fonts
