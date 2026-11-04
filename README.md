@@ -28,9 +28,11 @@ Modern also switches apps to dark mode: GTK3 and GTK4/libadwaita apps, Firefox a
 
 ![Modern with dark apps](docs/screenshots/modern-dark-apps.png)
 
-The login screen matches the default look:
+The login screen shows everyone's account picture and matches the default look:
 
-![Modern login screen](docs/screenshots/login-modern.png)
+| Modern | Classic |
+|---|---|
+| ![Modern login screen](docs/screenshots/login-modern.png) | ![Classic login screen](docs/screenshots/login-classic.png) |
 
 Want Modern with light apps, or Classic with dark ones? The Appearance window also has a **Programs** setting: **Match the look** (the default), **Light** or **Dark**. Light or Dark keeps apps that way whichever look you choose. From a terminal: `ujust dark-mode on|off|auto` (or `firox-theme apps dark|light|auto`).
 
@@ -48,8 +50,10 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Desktop | `pcmanfm-qt --desktop`: wallpaper plus Computer / Home / Recycle Bin / Network icons |
 | Settings | `firox-control-panel` (the Control Panel): Display, Sound, Network, Bluetooth, Printers, Disks, Web Apps, Android, Bazaar, Date and Time, **User Accounts** (change your account picture from a built-in set or any image, or your password; also opened by clicking the picture in the Start menu), System... |
 | Web Apps | `firox-webapps`: list, open and remove installed PWAs |
-| Login | greetd + gtkgreet (in cage) via `firox-greeter`, styled to match the default look in `/etc/firox/theme`: grey card on the Slate wallpaper (Modern) or the XP-style blue welcome screen (Classic) |
+| Login | `firox-welcome`, a greetd greeter in cage (`firox-greeter`): "To begin, click your user name" with everyone's account picture, Other user… for accounts not listed, and Turn off computer (sleep, turn off, restart). Styled to match the default look in `/etc/firox/theme`. Pictures come from AccountsService (`/var/lib/AccountsService/icons`), which Settings → User Accounts updates. Uses the keyboard layout chosen when installing. Falls back to gtkgreet if it can't start |
 | Displays | **Settings → Display** (`firox-display`) opens wdisplays and saves the layout when you close it (`firox-displays save`: a kanshi profile per set of connected monitors; resolutions the screen doesn't advertise are saved as custom modes). At login kanshi applies it and `firox-displays restore` double-checks and re-applies anything that didn't take. Log: `~/.local/state/firox/displays.log` |
+| Mouse and keyboard | **Settings → Mouse**: pointer speed and acceleration, left-handed buttons, double-click speed, pointer size, scroll speed, natural scrolling, and a Touchpad tab (tap to click, two-finger or edge scrolling, right-click method, ignore while typing, off when a mouse is plugged in). **Settings → Keyboard**: repeat delay and rate, Num Lock at login, keyboard layouts with variants and a switching shortcut. Stored by `firox-input` in `~/.config/firox/input.conf`; it writes complete labwc config files to `~/.local/share/firox/xdg/labwc`, which labwc reads after `~/.config/labwc` (so a personal rc.xml still wins). The layout chosen when installing is the default |
+| Notifications | mako pop-ups, plus a bell in the notification area (`firox-notifications`): it shows how many are new and opens a panel with the last 100 notifications (click one to open its app). **Do Not Disturb** (in the panel, or right-click the bell) holds pop-ups except urgent ones. Pop-ups are also held while a screen saver runs |
 | Clipboard | `firox-clipboard` (cliphist): what you copy stays available after the app you copied it from closes (normally it's lost on Wayland), **Super+V** clipboard history with search and images, never stores items password managers mark as sensitive, cleared at logout by default. **Settings → Clipboard** sets the history size or turns it off. The Command Prompt also takes `Ctrl+Insert` / `Shift+Insert`, and Waydroid shares the clipboard with Android (`python3-pyclip`) |
 | Power saving | **Settings → Power Options** (`firox-power`): turn off the monitor, lock the screen and put the computer to sleep after a set idle time, with separate **Plugged in** and **On battery** times on laptops. Defaults: lock after 10 min; monitor off after 15 min (5 on battery); sleep never (30 min on battery). Videos and full-screen apps keep the screen on. System defaults: `/etc/firox/power.conf` |
 | Screen savers | **Settings → Screen Saver** (`firox-screensaver`): Aquarium (asciiquarium), Matrix (cmatrix), Bonsai (cbonsai), Bouncing firox, Starfield or Blank, full screen after a set idle time (off by default), with Preview. [Add your own](#adding-screen-savers) |
@@ -58,6 +62,12 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 ![Power Options on a laptop](docs/screenshots/power-options.png)
 
 ![Clipboard history (Super+V)](docs/screenshots/clipboard-history.png)
+
+![Notification panel, Modern and Classic](docs/screenshots/notifications.png)
+
+| Mouse → Touchpad | Keyboard → Layouts |
+|---|---|
+| ![Mouse settings](docs/screenshots/mouse-touchpad.png) | ![Keyboard settings](docs/screenshots/keyboard-layouts.png) |
 
 ### Keyboard shortcuts
 

@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+# Share the user's account picture (~/.face, set in Settings > User Accounts)
+# with the login screen. Home folders are private, so the login screen can't
+# read ~/.face itself; AccountsService copies it to
+# /var/lib/AccountsService/icons/USER, where login screens look.
+#   account-picture          share it if it changed since last time (login)
+#   account-picture --force  share it now
+face="$HOME/.face"
+stamp="${XDG_STATE_HOME:-$HOME/.local/state}/firox/face-shared"
+[ -f "$face" ] || exit 0
+if [ "${1:-}" != --force ] && [ -e "$stamp" ] && [ "$stamp" -nt "$face" ]; then
+    exit 0
+fi
+path="$(busctl --system call org.freedesktop.Accounts /org/freedesktop/Accounts \
+        org.freedesktop.Accounts FindUserById x "$(id -u)" 2>/dev/null | sed -n 's/^o "\(.*\)"$/\1/p')"
+[ -n "$path" ] || exit 1
+busctl --system call org.freedesktop.Accounts "$path" org.freedesktop.Accounts.User \
+    SetIconFile s "$face" >/dev/null 2>&1 || exit 1
+mkdir -p "$(dirname "$stamp")" && touch "$stamp"

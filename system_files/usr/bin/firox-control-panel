@@ -944,6 +944,9 @@ class AccountsDialog(Gtk.Dialog):
         pb.savev(tmp, "png", [], [])
         os.chmod(tmp, 0o644)
         os.replace(tmp, FACE)
+        # Show it on the login screen too
+        subprocess.Popen(["/usr/libexec/firox/account-picture", "--force"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class ControlPanel(Gtk.ApplicationWindow):

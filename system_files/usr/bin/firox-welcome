@@ -1,0 +1,484 @@
+#!/usr/bin/python3
+"""
+firox-welcome: the Firox Linux login screen ("To begin, click your user name").
+
+A greetd greeter: run by firox-greeter inside the cage kiosk compositor as the
+greetd user. It lists the people who can log in, with their account pictures,
+and talks to greetd over $GREETD_SOCK (length-prefixed JSON) to log them in.
+
+    firox-welcome [--theme classic|modern] [--session CMD]
+
+Pictures come from /var/lib/AccountsService/icons/USER, which Settings > User
+Accounts fills in (home folders are private, so ~/.face can't be read here).
+The look follows /etc/firox/theme (welcome.css in the theme folder).
+"""
+
+import json
+import os
+import pwd
+import shlex
+import socket
+import struct
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
+
+THEMES = "/usr/share/firox/themes"
+ICONS = "/var/lib/AccountsService/icons"
+USERS_DIR = "/var/lib/AccountsService/users"
+DEFAULT_FACE = "/usr/share/firox/icons/user-default.svg"
+ENVIRONMENTS = "/etc/greetd/environments"
+NOLOGIN = ("nologin", "false", "sync", "shutdown", "halt")
+
+
+# ------------------------------------------------------------------ greetd --
+
+class Greetd:
+    """Minimal greetd IPC client."""
+
+    def __init__(self, path):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(path)
+
+    def request(self, msg):
+        data = json.dumps(msg).encode()
+        self.sock.sendall(struct.pack("=I", len(data)) + data)
+        (length,) = struct.unpack("=I", self._read(4))
+        return json.loads(self._read(length))
+
+    def _read(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("greetd closed the connection")
+            buf += chunk
+        return buf
+
+
+# ------------------------------------------------------------------- users --
+
+def login_defs():
+    lo, hi = 1000, 60000
+    try:
+        with open("/etc/login.defs") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) == 2 and parts[0] == "UID_MIN":
+                    lo = int(parts[1])
+                elif len(parts) == 2 and parts[0] == "UID_MAX":
+                    hi = int(parts[1])
+    except (OSError, ValueError):
+        pass
+    return lo, hi
+
+
+def hidden_by_accountsservice(name):
+    try:
+        with open(os.path.join(USERS_DIR, name)) as fh:
+            return any(line.strip().lower() == "systemaccount=true" for line in fh)
+    except OSError:
+        return False
+
+
+def users():
+    lo, hi = login_defs()
+    out = []
+    for e in pwd.getpwall():
+        if not lo <= e.pw_uid <= hi or os.path.basename(e.pw_shell) in NOLOGIN:
+            continue
+        if hidden_by_accountsservice(e.pw_name):
+            continue
+        real = e.pw_gecos.split(",")[0].strip() or e.pw_name
+        out.append((e.pw_name, real))
+    return sorted(out, key=lambda u: u[1].lower())
+
+
+def picture(name, size):
+    paths = [DEFAULT_FACE]
+    if name:
+        paths[:0] = [os.path.join(ICONS, name), os.path.join(os.path.expanduser(f"~{name}"), ".face")]
+    for path in paths:
+        try:
+            if os.path.isfile(path) and os.access(path, os.R_OK):
+                return GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, False)
+        except GLib.Error:
+            continue
+    return None
+
+
+def session_command():
+    try:
+        with open(ENVIRONMENTS) as fh:
+            for line in fh:
+                if line.strip() and not line.startswith("#"):
+                    return shlex.split(line.strip())
+    except OSError:
+        pass
+    return ["firox-session"]
+
+
+def theme_name(arg=None):
+    name = arg
+    if not name:
+        try:
+            with open("/etc/firox/theme") as fh:
+                name = fh.read().strip()
+        except OSError:
+            name = "modern"
+    return name if os.path.exists(os.path.join(THEMES, name, "welcome.css")) else "classic"
+
+
+# --------------------------------------------------------------------- UI --
+
+class Tile(Gtk.EventBox):
+    """One person: picture + name; expands to a password box when chosen."""
+
+    def __init__(self, welcome, name, real):
+        super().__init__()
+        self.welcome, self.name, self.real = welcome, name, real
+        self.get_style_context().add_class("tile")
+        self.set_visible_window(True)
+        row = Gtk.Box(spacing=14)
+        row.get_style_context().add_class("tile-row")
+        frame = Gtk.Box()
+        frame.get_style_context().add_class("picture")
+        pb = picture(name, 56) if name is not None else None
+        if pb:
+            img = Gtk.Image.new_from_pixbuf(pb)
+        else:
+            img = Gtk.Image.new_from_icon_name("system-users", Gtk.IconSize.DIALOG)
+            img.set_pixel_size(56)
+        frame.add(img)
+        frame.set_valign(Gtk.Align.START)
+        row.pack_start(frame, False, False, 0)
+
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        col.set_valign(Gtk.Align.CENTER)
+        label = Gtk.Label(label=real, xalign=0)
+        label.get_style_context().add_class("name")
+        col.pack_start(label, False, False, 0)
+
+        self.prompt = Gtk.Label(label="Type your password", xalign=0)
+        self.prompt.get_style_context().add_class("prompt")
+        col.pack_start(self.prompt, False, False, 0)
+        entry_row = Gtk.Box(spacing=6)
+        self.entry = Gtk.Entry(visibility=False, width_chars=22)
+        self.entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        self.entry.connect("activate", lambda _e: self.welcome.submit(self))
+        entry_row.pack_start(self.entry, False, False, 0)
+        self.go = Gtk.Button()
+        self.go.get_style_context().add_class("go")
+        self.go.add(Gtk.Label(label="→"))
+        self.go.set_tooltip_text("Log on")
+        self.go.connect("clicked", lambda _b: self.welcome.submit(self))
+        entry_row.pack_start(self.go, False, False, 0)
+        col.pack_start(entry_row, False, False, 0)
+        self.message = Gtk.Label(xalign=0, wrap=True, max_width_chars=34)
+        self.message.get_style_context().add_class("message")
+        col.pack_start(self.message, False, False, 0)
+        row.pack_start(col, True, True, 0)
+        self.add(row)
+        self.extra = [self.prompt, entry_row, self.message]
+        self.connect("button-press-event", lambda *_: self.welcome.select(self) or False)
+
+    def expand(self, on, prompt=None):
+        ctx = self.get_style_context()
+        (ctx.add_class if on else ctx.remove_class)("selected")
+        for w in self.extra:
+            w.set_visible(on)
+        self.message.set_visible(on and bool(self.message.get_text()))
+        if prompt is not None:
+            self.prompt.set_text(prompt)
+        if on:
+            self.entry.grab_focus()
+
+    def say(self, text):
+        self.message.set_text(text or "")
+        self.message.set_visible(bool(text))
+
+
+class Welcome(Gtk.Window):
+    def __init__(self, theme, session):
+        super().__init__(title="Welcome")
+        self.session = session
+        self.greetd = None
+        self.current = None
+        self.awaiting = None      # the auth message we're answering
+        self.busy = False
+
+        css = Gtk.CssProvider()
+        css.load_from_path(os.path.join(THEMES, theme, "welcome.css"))
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.set_name("welcome")
+        self.connect("destroy", Gtk.main_quit)
+        self.connect("key-press-event", self.on_key)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+        top = Gtk.Box()
+        top.set_name("topbar")
+        root.pack_start(top, False, False, 0)
+        line = Gtk.Box()
+        line.set_name("topline")
+        root.pack_start(line, False, False, 0)
+
+        middle = Gtk.Box()
+        middle.set_name("middle")
+        root.pack_start(middle, True, True, 0)
+
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        left.set_name("left")
+        left.set_valign(Gtk.Align.CENTER)
+        logo = Gtk.Label(label="firox", xalign=1)
+        logo.set_name("logo")
+        left.pack_start(logo, False, False, 0)
+        hint = Gtk.Label(label="To begin, click your user name", xalign=1)
+        hint.set_name("hint")
+        left.pack_start(hint, False, False, 0)
+        middle.pack_start(left, True, True, 0)
+
+        divider = Gtk.Box()
+        divider.set_name("divider")
+        middle.pack_start(divider, False, False, 0)
+
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        right.set_name("right")
+        right.set_valign(Gtk.Align.CENTER)
+        right.set_halign(Gtk.Align.START)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_max_content_height(520)
+        self.list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.list.set_size_request(400, -1)
+        scroll.add(self.list)
+        right.pack_start(scroll, False, False, 0)
+        middle.pack_start(right, True, True, 0)
+
+        self.tiles = [Tile(self, name, real) for name, real in users()]
+        for t in self.tiles:
+            self.list.pack_start(t, False, False, 0)
+        # Someone not in the list (e.g. a network account)
+        self.other = Tile(self, None, "Other user…")
+        self.other.user_entry = Gtk.Entry(placeholder_text="User name", width_chars=22,
+                                          halign=Gtk.Align.START)
+        self.other.user_entry.connect("activate", lambda _e: self.other.entry.grab_focus())
+        self.other.extra[1].get_parent().pack_start(self.other.user_entry, False, False, 0)
+        self.other.extra[1].get_parent().reorder_child(self.other.user_entry, 1)
+        self.other.extra.append(self.other.user_entry)
+        self.list.pack_start(self.other, False, False, 0)
+
+        bottomline = Gtk.Box()
+        bottomline.set_name("bottomline")
+        root.pack_start(bottomline, False, False, 0)
+        bottom = Gtk.Box(spacing=10)
+        bottom.set_name("bottombar")
+        power = Gtk.Button()
+        power.set_name("power")
+        pbox = Gtk.Box(spacing=8)
+        pbox.pack_start(Gtk.Image.new_from_icon_name("system-shutdown", Gtk.IconSize.LARGE_TOOLBAR),
+                        False, False, 0)
+        pbox.pack_start(Gtk.Label(label="Turn off computer"), False, False, 0)
+        power.add(pbox)
+        power.connect("clicked", self.on_power)
+        bottom.pack_start(power, False, False, 0)
+        tip = Gtk.Label(label="After you log on, you can add or change accounts.\n"
+                              "Just go to Settings and click User Accounts.", xalign=1)
+        tip.set_name("tip")
+        bottom.pack_end(tip, False, False, 0)
+        root.pack_start(bottom, False, False, 0)
+
+        self.fullscreen()
+        self.show_all()
+        for t in self.tiles + [self.other]:
+            t.expand(False)
+        if len(self.tiles) == 1:
+            GLib.idle_add(lambda: self.select(self.tiles[0]) and False)
+
+    # ---------------------------------------------------------- greetd --
+
+    def connect_greetd(self):
+        if self.greetd is None:
+            self.greetd = Greetd(os.environ["GREETD_SOCK"])
+        return self.greetd
+
+    def cancel(self):
+        if self.greetd is not None:
+            try:
+                self.greetd.request({"type": "cancel_session"})
+            except (OSError, ConnectionError, ValueError):
+                self.greetd = None
+        self.awaiting = None
+
+    def select(self, tile):
+        if self.busy or tile is self.current:
+            return
+        self.cancel()
+        if self.current is not None:
+            self.current.expand(False)
+            self.current.entry.set_text("")
+        self.current = tile
+        for t in self.tiles + [self.other]:
+            t.get_style_context().remove_class("dimmed")
+            if t is not tile:
+                t.get_style_context().add_class("dimmed")
+        tile.say("")
+        tile.expand(True, "Type your password")
+        if tile.name is None:
+            tile.user_entry.grab_focus()
+        else:
+            self.begin(tile)
+
+    def begin(self, tile):
+        """Start a login for the tile's user and show greetd's first question."""
+        name = tile.name if tile.name is not None else tile.user_entry.get_text().strip()
+        if not name:
+            tile.say("Type a user name.")
+            return False
+        try:
+            reply = self.connect_greetd().request({"type": "create_session", "username": name})
+        except (OSError, ConnectionError, KeyError, ValueError) as err:
+            tile.say(f"Can't reach the login service ({err}).")
+            self.greetd = None
+            return False
+        return self.handle(tile, reply)
+
+    def handle(self, tile, reply):
+        kind = reply.get("type")
+        if kind == "auth_message":
+            mtype, text = reply.get("auth_message_type"), reply.get("auth_message", "")
+            if mtype in ("info", "error"):
+                tile.say(text.strip())
+                return self.handle(tile, self.connect_greetd().request(
+                    {"type": "post_auth_message_response", "response": None}))
+            self.awaiting = mtype
+            tile.entry.set_visibility(mtype == "visible")
+            prompt = text.strip().rstrip(":") or "Password"
+            if prompt.lower() in ("password", "passwort"):
+                prompt = "Type your password"
+            tile.expand(True, prompt)
+            return True
+        if kind == "success":
+            return self.start(tile)
+        if kind == "error":
+            self.cancel()
+            if reply.get("error_type") == "auth_error":
+                tile.say("The password is incorrect. Please try again.\n"
+                         "Make sure Caps Lock is off.")
+            else:
+                tile.say(reply.get("description") or "Couldn't log on.")
+            tile.entry.set_text("")
+            if tile.name is not None:
+                GLib.idle_add(lambda: self.begin(tile) and False)
+            return False
+        return False
+
+    def submit(self, tile):
+        if self.busy or tile is not self.current:
+            return
+        if self.awaiting is None:
+            # "Other user" (or a retry): start the login with the typed name
+            if not self.begin(tile) or self.awaiting is None:
+                return
+        self.busy = True
+        tile.say("")
+        tile.prompt.set_text("Logging on…")
+        response = tile.entry.get_text()
+        try:
+            reply = self.connect_greetd().request(
+                {"type": "post_auth_message_response", "response": response})
+        except (OSError, ConnectionError, ValueError) as err:
+            tile.say(f"Can't reach the login service ({err}).")
+            self.greetd = None
+            self.busy = False
+            return
+        self.awaiting = None
+        self.busy = False
+        self.handle(tile, reply)
+
+    def start(self, tile):
+        reply = self.connect_greetd().request({"type": "start_session", "cmd": self.session,
+                                               "env": []})
+        if reply.get("type") == "success":
+            tile.prompt.set_text("Welcome")
+            # greetd starts the session once the greeter exits
+            GLib.timeout_add(150, Gtk.main_quit)
+            return True
+        tile.say(reply.get("description") or "Couldn't start the desktop.")
+        self.cancel()
+        return False
+
+    # -------------------------------------------------------------- misc --
+
+    def on_key(self, _w, event):
+        if event.keyval == Gdk.KEY_Escape and self.current is not None:
+            self.cancel()
+            self.current.expand(False)
+            self.current.entry.set_text("")
+            for t in self.tiles + [self.other]:
+                t.get_style_context().remove_class("dimmed")
+            self.current = None
+        return False
+
+    def on_power(self, _b):
+        dlg = Gtk.Dialog(title="Turn off computer", transient_for=self, modal=True)
+        dlg.set_name("power-dialog")
+        dlg.set_decorated(False)
+        area = dlg.get_content_area()
+        area.set_spacing(14)
+        area.set_border_width(20)
+        title = Gtk.Label(label="Turn off computer")
+        title.get_style_context().add_class("title")
+        area.pack_start(title, False, False, 0)
+        row = Gtk.Box(spacing=24, halign=Gtk.Align.CENTER)
+        for icon, label, cmd in (("system-suspend", "Sleep", ["systemctl", "suspend"]),
+                                 ("system-shutdown", "Turn Off", ["systemctl", "poweroff"]),
+                                 ("system-reboot", "Restart", ["systemctl", "reboot"])):
+            b = Gtk.Button()
+            b.get_style_context().add_class("power-choice")
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
+            img.set_pixel_size(40)
+            col.pack_start(img, False, False, 0)
+            col.pack_start(Gtk.Label(label=label), False, False, 0)
+            b.add(col)
+            b.connect("clicked", lambda _b, c=cmd: (dlg.destroy(), subprocess.Popen(c)))
+            row.pack_start(b, False, False, 0)
+        area.pack_start(row, False, False, 0)
+        cancel = Gtk.Button(label="Cancel", halign=Gtk.Align.END)
+        cancel.connect("clicked", lambda _b: dlg.destroy())
+        area.pack_start(cancel, False, False, 0)
+        dlg.show_all()
+
+
+def main(argv):
+    theme = None
+    session = None
+    args = argv[1:]
+    while args:
+        a = args.pop(0)
+        if a == "--theme" and args:
+            theme = args.pop(0)
+        elif a == "--session" and args:
+            session = shlex.split(args.pop(0))
+        else:
+            print(__doc__.strip(), file=sys.stderr)
+            return 2
+    if "GREETD_SOCK" not in os.environ:
+        print("firox-welcome: GREETD_SOCK isn't set (run by greetd)", file=sys.stderr)
+        return 1
+    Welcome(theme_name(theme), session or session_command())
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
