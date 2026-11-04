@@ -1,12 +1,8 @@
 ---
 name: Build container image
 on:
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+  # No build on pull requests: the image is built (and published) once,
+  # after merging to main
   schedule:
     - cron: '05 10 * * *'  # 10:05am UTC everyday
   push:
