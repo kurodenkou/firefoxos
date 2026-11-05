@@ -6,7 +6,8 @@ set -u
 notify() { notify-send -a Firox -i "${3:-dialog-information}" "$1" "${2:-}" 2>/dev/null || true; }
 files() { exec pcmanfm-qt "$@"; }
 dir() { local d; d="$(xdg-user-dir "$1" 2>/dev/null)"; [ -d "$d" ] || d="$HOME"; echo "$d"; }
-terminal() { exec foot -T "$1" -- "${@:2}"; }
+# A window of its own (--disable-server), titled, running the command
+terminal() { exec xfce4-terminal --disable-server -T "$1" -x "${@:2}"; }
 waydroid_ready() { [ -f /var/lib/waydroid/waydroid.cfg ]; }
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
 # Themed config for TOOL unless the user has their own
@@ -44,7 +45,7 @@ case "$verb" in
         ;;
 
     # --- apps / system --------------------------------------------------
-    task-manager) terminal "Task Manager" htop ;;
+    task-manager) terminal "Task Manager" btop ;;
     help)       exec firefox "file:///usr/share/firox/help/index.html" ;;
     printers)   exec system-config-printer ;;
     software)

@@ -65,7 +65,7 @@ DEFAULT_MFU = [
     "pcmanfm-qt.desktop",
     "org.xfce.mousepad.desktop",
     "galculator.desktop",
-    "foot.desktop",
+    "xfce4-terminal.desktop",
     "org.xfce.ristretto.desktop",
     "org.pulseaudio.pavucontrol.desktop",
 ]
@@ -75,7 +75,9 @@ FRIENDLY_NAMES = {
     "pcmanfm-qt.desktop": "File Manager",
     "org.xfce.mousepad.desktop": "Text Editor",
     "galculator.desktop": "Calculator",
-    "foot.desktop": "Command Prompt",
+    "xfce4-terminal.desktop": "Command Prompt",
+    "btop.desktop": "Task Manager",
+    "vlc.desktop": "Media Player",
     "org.xfce.ristretto.desktop": "Picture Viewer",
     "org.pulseaudio.pavucontrol.desktop": "Volume Control",
 }
@@ -89,8 +91,12 @@ PINNED = [
 
 # Desktop entries we never list (helpers, duplicates, ourselves).
 HIDDEN = {
+    "foot.desktop",                      # the Command Prompt is xfce4-terminal
     "foot-server.desktop",
     "footclient.desktop",
+    "xfce4-terminal-settings.desktop",   # its Edit > Preferences
+    "htop.desktop",                      # Task Manager is btop
+    "vlc-openbd.desktop", "vlc-opencda.desktop", "vlc-opendvd.desktop", "vlc-openvcd.desktop",
     "firox-startmenu.desktop",
     "pcmanfm-qt-desktop-pref.desktop",
     "org.xfce.mousepad-settings.desktop",
@@ -707,11 +713,11 @@ class StartMenu(Gtk.Window):
             info.launch([], ctx)
             self.usage.bump(info.get_id())
         except GLib.Error as err:
-            # Terminal apps (htop, nvtop...) need GLib to find a terminal; if it
-            # can't (no xdg-terminal-exec), open them in foot ourselves.
+            # Terminal apps (btop, nvtop...) need GLib to find a terminal; if it
+            # can't (no xdg-terminal-exec), open them in the Command Prompt ourselves.
             cmd = re.sub(r"%[a-zA-Z]", "", info.get_commandline() or "").strip()
             if info.get_boolean("Terminal") and cmd:
-                spawn(["foot", "--", "sh", "-c", cmd])
+                spawn(["xfce4-terminal", "-x", "sh", "-c", cmd])
                 self.usage.bump(info.get_id())
             else:
                 print(f"startmenu: launch failed: {err.message}", file=sys.stderr)

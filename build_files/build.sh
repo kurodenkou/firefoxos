@@ -83,12 +83,16 @@ PACKAGES=(
     xdg-utils
 
     # --- Accessories & Control Panel applets ---
-    foot                         # Command Prompt
-    xdg-terminal-exec            # lets apps like htop/nvtop open in foot
+    foot                         # helper windows; screen saver fallback
+    xdg-terminal-exec            # lets apps like btop/nvtop open in the Command Prompt
     mousepad                     # Notepad
     galculator                   # Calculator
     ristretto                    # Picture viewer
-    htop                         # Task Manager
+    htop
+    btop                         # Task Manager
+    xfce4-terminal               # Command Prompt (tabs, preferences)
+    vlc                          # Media Player (music, videos, DVDs)
+    vlc-plugin-ffmpeg            # VLC's codecs (weak deps are off; uses the base's full ffmpeg)
     fastfetch
 
     # --- Screen savers (Control Panel > Screen Saver) ---
