@@ -152,6 +152,13 @@ class Gadget(Gtk.EventBox):
         self.area = Gtk.DrawingArea()
         self.area.set_size_request(WIDTH, self.HEIGHT)
         self.area.connect("draw", lambda _w, cr: self.draw(cr, WIDTH, self.HEIGHT) or False)
+        # The drawing area has its own window: clicks and hovering must be
+        # taken there, or they never reach the gadget
+        self.area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.ENTER_NOTIFY_MASK
+                             | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.area.connect("button-press-event", self.on_press)
+        self.area.connect("enter-notify-event", lambda *_: self.close.show() or False)
+        self.area.connect("leave-notify-event", self.on_leave)
         overlay.add(self.area)
         self.close = Gtk.Button(label="×")
         self.close.get_style_context().add_class("gadget-close")
@@ -176,7 +183,15 @@ class Gadget(Gtk.EventBox):
         return True
 
     def on_leave(self, _w, event):
-        if event.detail != Gdk.NotifyType.INFERIOR:
+        # Moving onto the × (or the note) isn't leaving the gadget
+        x, y = self.translate_coordinates(self.get_toplevel(), 0, 0)
+        alloc = self.get_allocation()
+        px, py = event.x_root, event.y_root
+        win = self.get_toplevel().get_window()
+        if win is not None:
+            ox, oy = win.get_origin()[1:]
+            px, py = px - ox, py - oy
+        if not (x <= px < x + alloc.width and y <= py < y + alloc.height):
             self.close.hide()
         return False
 
@@ -374,6 +389,7 @@ WMO = {  # Open-Meteo weather codes -> (description, icon)
 
 # Weather service (override for a self-hosted Open-Meteo, or for testing)
 OPEN_METEO = os.environ.get("FIROX_OPEN_METEO", "https://api.open-meteo.com").rstrip("/")
+OPEN_METEO_GEO = os.environ.get("FIROX_OPEN_METEO_GEOCODING", "https://geocoding-api.open-meteo.com").rstrip("/")
 
 
 def fetch_json(url):
@@ -517,7 +533,7 @@ class Weather(Gadget):
         # "Springfield, Illinois": search the first part, prefer the region
         parts = [p.strip() for p in name.split(",")]
         try:
-            res = fetch_json("https://geocoding-api.open-meteo.com/v1/search?" + urllib.parse.urlencode(
+            res = fetch_json(OPEN_METEO_GEO + "/v1/search?" + urllib.parse.urlencode(
                 {"name": parts[0], "count": 10, "language": "en", "format": "json"})).get("results") or []
         except Exception as e:  # noqa: BLE001
             print(f"gadgets: geocoding: {e}", file=sys.stderr)
