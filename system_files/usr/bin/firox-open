@@ -45,7 +45,7 @@ case "$verb" in
         ;;
 
     # --- apps / system --------------------------------------------------
-    task-manager) terminal "Task Manager" btop --force-utf ;;
+    task-manager) exec firox-taskmgr ;;
     help)       exec firefox "file:///usr/share/firox/help/index.html" ;;
     printers)   exec system-config-printer ;;
     software)

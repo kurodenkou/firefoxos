@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Task Manager
+Comment=Running programs, processes and performance
+Exec=firox-taskmgr
+Icon=utilities-system-monitor
+Categories=System;Monitor;
+Keywords=processes;cpu;memory;end task;kill;
+StartupNotify=false

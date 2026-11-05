@@ -1,0 +1,507 @@
+#!/usr/bin/python3
+"""
+firox-taskmgr: Firox Task Manager (Ctrl+Alt+Del).
+
+    firox-taskmgr [applications|processes|performance]
+
+Applications: the open windows; Switch To or End Task (asks the program to
+close). Processes: what's running, with CPU and memory use; End Process.
+Performance: CPU and memory graphs and totals. For the terminal view, btop is
+in the Start menu.
+"""
+
+import os
+import pwd
+import sys
+import time
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+
+import psutil  # noqa: E402
+
+sys.path.insert(0, "/usr/lib/firox/python")
+try:
+    import firox_toplevels  # noqa: E402
+except ImportError:            # no pywayland: no Applications tab contents
+    firox_toplevels = None
+
+INTERVAL = 2000          # ms between updates
+HISTORY = 60             # points on the graphs
+TABS = ["applications", "processes", "performance"]
+
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return str(n)
+
+
+def uptime():
+    secs = int(time.time() - psutil.boot_time())
+    d, secs = divmod(secs, 86400)
+    h, secs = divmod(secs, 3600)
+    m = secs // 60
+    return (f"{d} d " if d else "") + f"{h}:{m:02d}"
+
+
+def app_name(app_id):
+    if not app_id:
+        return "Program"
+    for cand in (app_id, app_id.lower()):
+        try:
+            info = Gio.DesktopAppInfo.new(cand + ".desktop")
+        except TypeError:
+            info = None
+        if info:
+            return info.get_name()
+    return app_id
+
+
+def app_icon(app_id):
+    for cand in (app_id, (app_id or "").lower()):
+        try:
+            info = Gio.DesktopAppInfo.new(cand + ".desktop") if cand else None
+        except TypeError:
+            info = None
+        if info and info.get_icon():
+            return info.get_icon()
+    theme = Gtk.IconTheme.get_default()
+    low = (app_id or "").lower()
+    return Gio.ThemedIcon.new(low if low and theme.has_icon(low) else "application-x-executable")
+
+
+# ------------------------------------------------------------------ graph --
+
+class Graph(Gtk.DrawingArea):
+    """The classic green-on-black history graph, scrolling left."""
+
+    def __init__(self, label):
+        super().__init__()
+        self.values = [0.0] * HISTORY
+        self.label = label
+        self.offset = 0
+        self.set_size_request(-1, 110)
+        self.connect("draw", self.on_draw)
+
+    def push(self, v):
+        self.values = self.values[1:] + [max(0.0, min(100.0, v))]
+        self.offset = (self.offset + 1) % 4
+        self.queue_draw()
+
+    def on_draw(self, _w, cr):
+        w, h = self.get_allocated_width(), self.get_allocated_height()
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        cr.set_line_width(1)
+        cr.set_source_rgb(0, 0.5, 0.25)
+        step = 12
+        for y in range(0, h, step):
+            cr.move_to(0, y + 0.5)
+            cr.line_to(w, y + 0.5)
+        x = w - (self.offset * step // 4)
+        while x > 0:
+            cr.move_to(x + 0.5, 0)
+            cr.line_to(x + 0.5, h)
+            x -= step
+        cr.stroke()
+        n = len(self.values)
+        cr.set_source_rgb(0.0, 1.0, 0.0)
+        cr.set_line_width(1.5)
+        for i, v in enumerate(self.values):
+            px = w * i / (n - 1)
+            py = h - 2 - (h - 4) * v / 100
+            (cr.move_to if i == 0 else cr.line_to)(px, py)
+        cr.stroke()
+        cr.set_source_rgb(0.0, 1.0, 0.0)
+        cr.select_font_face("Sans")
+        cr.set_font_size(11)
+        cr.move_to(6, 14)
+        cr.show_text(f"{self.label}: {self.values[-1]:.0f}%")
+        return False
+
+
+class Meter(Gtk.DrawingArea):
+    """The small bar beside a graph."""
+
+    def __init__(self):
+        super().__init__()
+        self.value = 0.0
+        self.text = ""
+        self.set_size_request(70, 110)
+        self.connect("draw", self.on_draw)
+
+    def set(self, value, text):
+        self.value, self.text = value, text
+        self.queue_draw()
+
+    def on_draw(self, _w, cr):
+        w, h = self.get_allocated_width(), self.get_allocated_height()
+        cr.set_source_rgb(0, 0, 0)
+        cr.paint()
+        bar_h = h - 26
+        lit = int(bar_h * self.value / 100)
+        for y in range(4, bar_h, 3):
+            on = (bar_h - y) <= lit
+            cr.set_source_rgb(0.0, 1.0 if on else 0.35, 0.0)
+            cr.rectangle(14, y, w / 2 - 16, 2)
+            cr.rectangle(w / 2 + 2, y, w / 2 - 16, 2)
+            cr.fill()
+        cr.set_source_rgb(0.0, 1.0, 0.0)
+        cr.select_font_face("Sans")
+        cr.set_font_size(11)
+        ext = cr.text_extents(self.text)
+        cr.move_to((w - ext.width) / 2, h - 8)
+        cr.show_text(self.text)
+        return False
+
+
+def framed(title, child):
+    frame = Gtk.Frame(label=title)
+    frame.add(child)
+    return frame
+
+
+# ----------------------------------------------------------------- window --
+
+class TaskManager(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Firox Task Manager")
+        self.set_default_size(560, 600)
+        self.set_icon_name("utilities-system-monitor")
+        self.me = pwd.getpwuid(os.getuid()).pw_name
+        self.ncpu = psutil.cpu_count() or 1
+        self.rows = {}               # pid -> Gtk.TreeIter
+        psutil.cpu_percent(None)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(outer)
+        outer.pack_start(self.build_menu(), False, False, 0)
+
+        self.notebook = Gtk.Notebook()
+        self.notebook.set_border_width(6)
+        self.notebook.append_page(self.build_apps(), Gtk.Label(label="Applications"))
+        self.notebook.append_page(self.build_procs(), Gtk.Label(label="Processes"))
+        self.notebook.append_page(self.build_perf(), Gtk.Label(label="Performance"))
+        outer.pack_start(self.notebook, True, True, 0)
+
+        self.status = Gtk.Box(spacing=0)
+        self.status.set_border_width(2)
+        self.st_procs, self.st_cpu, self.st_mem = (Gtk.Label(xalign=0) for _ in range(3))
+        for lab in (self.st_procs, self.st_cpu, self.st_mem):
+            fr = Gtk.Frame()
+            fr.set_shadow_type(Gtk.ShadowType.IN)
+            lab.set_margin_start(6)
+            lab.set_margin_end(6)
+            fr.add(lab)
+            self.status.pack_start(fr, True, True, 1)
+        outer.pack_start(self.status, False, False, 0)
+
+        self.toplevels = None
+        if firox_toplevels is not None:
+            firox_toplevels.NAME_FOR = app_name
+            try:
+                self.toplevels = firox_toplevels.Toplevels(self.fill_apps, on_lost=lambda: None)
+            except firox_toplevels.Unavailable as err:
+                print(f"task manager: {err}", file=sys.stderr)
+        self.fill_apps()
+        self.tick()
+        GLib.timeout_add(INTERVAL, self.tick)
+
+    # ------------------------------------------------------------ menus --
+    def build_menu(self):
+        bar = Gtk.MenuBar()
+
+        def menu(label, items):
+            top = Gtk.MenuItem.new_with_mnemonic(label)
+            sub = Gtk.Menu()
+            for text, cb in items:
+                if text is None:
+                    sub.append(Gtk.SeparatorMenuItem())
+                    continue
+                it = Gtk.MenuItem.new_with_mnemonic(text)
+                it.connect("activate", lambda _i, cb=cb: cb())
+                sub.append(it)
+            top.set_submenu(sub)
+            bar.append(top)
+        menu("_File", [("_New Task (Run…)", self.new_task), (None, None), ("E_xit Task Manager", self.close)])
+        menu("_View", [("_Refresh Now", self.tick),
+                       ("Resource Monitor (_btop)", lambda: self.spawn(
+                           ["xfce4-terminal", "--disable-server", "-T", "Resource Monitor", "-x", "btop", "--force-utf"]))])
+        menu("_Help", [("Task Manager _Help", lambda: self.spawn(["firox-open", "help"]))])
+        return bar
+
+    @staticmethod
+    def spawn(argv):
+        try:
+            GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
+        except GLib.Error as err:
+            print(f"task manager: {err.message}", file=sys.stderr)
+
+    def new_task(self):
+        self.spawn(["firox-open", "run"])
+
+    # ----------------------------------------------------- applications --
+    def build_apps(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(8)
+        self.apps = Gtk.ListStore(Gio.Icon, str, str, int)     # icon, task, status, seq
+        view = Gtk.TreeView(model=self.apps)
+        view.set_headers_clickable(True)
+        col = Gtk.TreeViewColumn("Task")
+        pix = Gtk.CellRendererPixbuf()
+        col.pack_start(pix, False)
+        col.add_attribute(pix, "gicon", 0)
+        text = Gtk.CellRendererText(ellipsize=3)
+        col.pack_start(text, True)
+        col.add_attribute(text, "text", 1)
+        col.set_expand(True)
+        col.set_sort_column_id(1)
+        view.append_column(col)
+        st = Gtk.TreeViewColumn("Status", Gtk.CellRendererText(), text=2)
+        st.set_sort_column_id(2)
+        view.append_column(st)
+        view.connect("row-activated", lambda *_: self.switch_to())
+        self.apps_view = view
+        sw = Gtk.ScrolledWindow()
+        sw.set_shadow_type(Gtk.ShadowType.IN)
+        sw.add(view)
+        box.pack_start(sw, True, True, 0)
+        self.apps_empty = Gtk.Label(label="The list of open windows isn't available here.")
+        self.apps_empty.set_no_show_all(True)
+        box.pack_start(self.apps_empty, False, False, 0)
+        row = Gtk.Box(spacing=6)
+        row.set_halign(Gtk.Align.END)
+        for label, cb in (("_End Task", self.end_task), ("_Switch To", self.switch_to), ("_New Task…", self.new_task)):
+            b = Gtk.Button.new_with_mnemonic(label)
+            b.connect("clicked", lambda _b, cb=cb: cb())
+            row.pack_start(b, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        return box
+
+    def fill_apps(self):
+        if self.toplevels is None:
+            self.apps_empty.show()
+            return
+        sel = self.selected_window()
+        self.apps.clear()
+        for w in self.toplevels.ordered():
+            it = self.apps.append([app_icon(w.app_id), w.label, "Minimized" if w.minimized else "Running", w.seq])
+            if sel is not None and w.seq == sel.seq:
+                self.apps_view.get_selection().select_iter(it)
+        self.st_apps = len(self.toplevels.windows)
+
+    def selected_window(self):
+        if self.toplevels is None:
+            return None
+        model, it = self.apps_view.get_selection().get_selected()
+        if it is None:
+            return None
+        seq = model[it][3]
+        return next((w for w in self.toplevels.windows.values() if w.seq == seq), None)
+
+    def switch_to(self):
+        w = self.selected_window()
+        if w is not None:
+            self.toplevels.activate(w)
+
+    def end_task(self):
+        w = self.selected_window()
+        if w is not None:
+            self.toplevels.close(w)       # asks it to close, like clicking ×
+
+    # -------------------------------------------------------- processes --
+    def build_procs(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(8)
+        # pid, name, user, cpu %, memory bytes, memory text, cpu text
+        self.procs = Gtk.ListStore(int, str, str, float, GObject.TYPE_UINT64, str, str)
+        view = Gtk.TreeView(model=self.procs)
+        for title, col_text, sort_col, xalign in (("Image Name", 1, 1, 0), ("User Name", 2, 2, 0),
+                                                  ("CPU", 6, 3, 1), ("Mem Usage", 5, 4, 1), ("PID", 0, 0, 1)):
+            r = Gtk.CellRendererText(xalign=xalign)
+            c = Gtk.TreeViewColumn(title, r, text=col_text)
+            c.set_sort_column_id(sort_col)
+            c.set_resizable(True)
+            if col_text == 1:
+                c.set_expand(True)
+            view.append_column(c)
+        self.procs.set_sort_column_id(3, Gtk.SortType.DESCENDING)
+        self.procs_view = view
+        sw = Gtk.ScrolledWindow()
+        sw.set_shadow_type(Gtk.ShadowType.IN)
+        sw.add(view)
+        box.pack_start(sw, True, True, 0)
+        row = Gtk.Box(spacing=6)
+        self.all_users = Gtk.CheckButton.new_with_mnemonic("Show processes from _all users")
+        self.all_users.connect("toggled", lambda _b: self.tick())
+        row.pack_start(self.all_users, False, False, 0)
+        end = Gtk.Button.new_with_mnemonic("_End Process")
+        end.connect("clicked", lambda _b: self.end_process())
+        row.pack_end(end, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        return box
+
+    def fill_procs(self):
+        mine_only = not self.all_users.get_active()
+        seen = set()
+        for p in psutil.process_iter(["pid", "name", "username", "memory_info"]):
+            info = p.info
+            if mine_only and info.get("username") != self.me:
+                continue
+            try:
+                cpu = p.cpu_percent(None) / self.ncpu
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            mem = info["memory_info"].rss if info.get("memory_info") else 0
+            pid = info["pid"]
+            seen.add(pid)
+            values = [pid, info.get("name") or "?", info.get("username") or "", cpu, mem,
+                      human(mem), f"{cpu:.0f}"]
+            it = self.rows.get(pid)
+            if it is not None and self.procs.iter_is_valid(it):
+                for i, v in enumerate(values):
+                    if self.procs[it][i] != v:
+                        self.procs.set_value(it, i, v)
+            else:
+                self.rows[pid] = self.procs.append(values)
+        for pid in list(self.rows):
+            if pid not in seen:
+                it = self.rows.pop(pid)
+                if self.procs.iter_is_valid(it):
+                    self.procs.remove(it)
+        return len(seen)
+
+    def end_process(self):
+        model, it = self.procs_view.get_selection().get_selected()
+        if it is None:
+            return
+        pid, name = model[it][0], model[it][1]
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.WARNING,
+                                buttons=Gtk.ButtonsType.NONE,
+                                text=f"Do you want to end {name}?")
+        dlg.format_secondary_text("Ending a process can make you lose unsaved work in it, "
+                                  "and ending a system process can make the computer unstable.")
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button("End Process", Gtk.ResponseType.OK)
+        ok = dlg.run() == Gtk.ResponseType.OK
+        dlg.destroy()
+        if not ok:
+            return
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            GLib.timeout_add(2500, self.kill_if_alive, proc)
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.AccessDenied:
+            self.error(f"{name} belongs to another user or the system, so it can't be ended from here.")
+        self.tick()
+
+    @staticmethod
+    def kill_if_alive(proc):
+        try:
+            if proc.is_running():
+                proc.kill()           # it ignored the polite request
+        except psutil.Error:
+            pass
+        return False
+
+    def error(self, text):
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.ERROR,
+                                buttons=Gtk.ButtonsType.OK, text="Unable to end the process")
+        dlg.format_secondary_text(text)
+        dlg.run()
+        dlg.destroy()
+
+    # ------------------------------------------------------ performance --
+    def build_perf(self):
+        grid = Gtk.Grid(column_spacing=8, row_spacing=8)
+        grid.set_border_width(8)
+        self.cpu_meter, self.mem_meter = Meter(), Meter()
+        self.cpu_graph, self.mem_graph = Graph("CPU"), Graph("Memory")
+        grid.attach(framed("CPU Usage", self.cpu_meter), 0, 0, 1, 1)
+        grid.attach(framed("CPU Usage History", self.cpu_graph), 1, 0, 1, 1)
+        grid.attach(framed("Memory", self.mem_meter), 0, 1, 1, 1)
+        grid.attach(framed("Memory Usage History", self.mem_graph), 1, 1, 1, 1)
+        self.cpu_graph.set_hexpand(True)
+        self.mem_graph.set_hexpand(True)
+
+        def table(rows):
+            g = Gtk.Grid(column_spacing=16, row_spacing=2)
+            g.set_border_width(6)
+            labels = {}
+            for i, name in enumerate(rows):
+                g.attach(Gtk.Label(label=name, xalign=0), 0, i, 1, 1)
+                v = Gtk.Label(xalign=1)
+                v.set_hexpand(True)
+                g.attach(v, 1, i, 1, 1)
+                labels[name] = v
+            return g, labels
+        totals, self.t_totals = table(["Processes", "Threads", "Up time"])
+        phys, self.t_phys = table(["Total", "Available", "Cached"])
+        swap, self.t_swap = table(["Total", "Used"])
+        row = Gtk.Box(spacing=8, homogeneous=True)
+        row.pack_start(framed("Totals", totals), True, True, 0)
+        row.pack_start(framed("Physical Memory", phys), True, True, 0)
+        row.pack_start(framed("Swap", swap), True, True, 0)
+        grid.attach(row, 0, 2, 2, 1)
+        return grid
+
+    def fill_perf(self, cpu, nprocs):
+        vm = psutil.virtual_memory()
+        sw = psutil.swap_memory()
+        mem_pct = vm.percent
+        self.cpu_meter.set(cpu, f"{cpu:.0f}%")
+        self.mem_meter.set(mem_pct, human(vm.total - vm.available))
+        self.cpu_graph.push(cpu)
+        self.mem_graph.push(mem_pct)
+        threads = 0
+        for p in psutil.process_iter(["num_threads"]):
+            threads += p.info.get("num_threads") or 0
+        self.t_totals["Processes"].set_text(str(nprocs))
+        self.t_totals["Threads"].set_text(str(threads))
+        self.t_totals["Up time"].set_text(uptime())
+        self.t_phys["Total"].set_text(human(vm.total))
+        self.t_phys["Available"].set_text(human(vm.available))
+        self.t_phys["Cached"].set_text(human(getattr(vm, "cached", 0)))
+        self.t_swap["Total"].set_text(human(sw.total))
+        self.t_swap["Used"].set_text(human(sw.used))
+        return mem_pct
+
+    # ------------------------------------------------------------ tick --
+    def tick(self):
+        cpu = psutil.cpu_percent(None)
+        self.fill_procs()
+        nprocs = len(psutil.pids())
+        mem = self.fill_perf(cpu, nprocs)
+        self.st_procs.set_text(f"Processes: {nprocs}")
+        self.st_cpu.set_text(f"CPU Usage: {cpu:.0f}%")
+        self.st_mem.set_text(f"Memory: {mem:.0f}%")
+        return True
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.TaskManager",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        if self.win is None:
+            self.win = TaskManager(self)
+            self.win.show_all()
+        if args and args[0] in TABS:
+            self.win.notebook.set_current_page(TABS.index(args[0]))
+        self.win.present()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))
