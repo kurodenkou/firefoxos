@@ -816,11 +816,29 @@ class TaskbarDialog(Gtk.Dialog):
                 lab.get_style_context().add_class("dim-label")
                 box.pack_start(lab, False, False, 0)
             self.checks[key] = cb
+        self.gadgets = Gtk.CheckButton(label="Show Desktop Gadgets (the Sidebar)")
+        self.gadgets_before = self.gadgets_enabled()
+        self.gadgets.set_active(self.gadgets_before)
+        box.pack_start(self.gadgets, False, False, 0)
+        lab = Gtk.Label(label="Clock, calendar, weather, CPU meter and more on the right of the desktop. "
+                              "Click + Gadgets on it to add more.", xalign=0, wrap=True, max_width_chars=46)
+        lab.set_margin_start(26)
+        lab.get_style_context().add_class("dim-label")
+        box.pack_start(lab, False, False, 0)
         reset = Gtk.Button(label="Reset Quick Launch to the defaults")
         reset.set_halign(Gtk.Align.START)
         reset.connect("clicked", self.on_reset)
         box.pack_start(reset, False, False, 4)
         self.show_all()
+
+    @staticmethod
+    def gadgets_enabled():
+        path = os.path.join(os.path.dirname(PANEL_CONF), "gadgets.conf")
+        try:
+            with open(path) as fh:
+                return not any(line.strip() == "ENABLED=0" for line in fh)
+        except OSError:
+            return True
 
     def on_reset(self, btn):
         subprocess.run(["firox-quicklaunch", "reset"])
@@ -837,6 +855,9 @@ class TaskbarDialog(Gtk.Dialog):
             for k, v in self.values.items():
                 fh.write(f"{k}={v}\n")
         os.replace(tmp, PANEL_CONF)
+        on = self.gadgets.get_active()
+        if on != self.gadgets_before:
+            spawn(["firox-gadgets", "on" if on else "off"])
 
 
 class DefaultsDialog(Gtk.Dialog):

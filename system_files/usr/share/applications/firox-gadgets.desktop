@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop Gadgets
+Comment=Clock, calendar, weather, CPU meter and more in a Sidebar on the desktop
+Exec=firox-gadgets on
+Icon=view-grid
+Categories=Utility;
+Keywords=gadgets;widgets;sidebar;clock;weather;
+StartupNotify=false
