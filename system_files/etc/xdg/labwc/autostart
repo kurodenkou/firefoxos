@@ -61,6 +61,9 @@ firox-power start
 # Low-battery warnings (laptops only; exits straight away without a battery)
 firox-power battery-watch >/dev/null 2>&1 &
 
+# Desktop Gadgets (the Sidebar; off in Settings > Taskbar or `firox-gadgets off`)
+firox-gadgets start >/dev/null 2>&1 &
+
 # "Firox Linux was updated" once after an update was applied
 ( sleep 20; firox-updates login ) >/dev/null 2>&1 &
 
