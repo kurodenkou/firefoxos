@@ -1,3 +1,4 @@
-# Terminal used for apps that run in one (htop, nvtop, ...): see xdg-terminal-exec
+# Terminal used for apps that run in one (btop, htop, nvtop, ...): see xdg-terminal-exec
+xfce4-terminal.desktop
 foot.desktop
 org.codeberg.dnkl.foot.desktop
