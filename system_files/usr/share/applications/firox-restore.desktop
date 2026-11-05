@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=System Restore
+Comment=Go back to the Firox Linux version you used before an update
+Exec=firox-restore
+Icon=document-revert
+Categories=System;Settings;
+Keywords=rollback;undo update;restore;previous version;
+StartupNotify=false

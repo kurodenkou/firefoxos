@@ -76,7 +76,7 @@ FRIENDLY_NAMES = {
     "org.xfce.mousepad.desktop": "Text Editor",
     "galculator.desktop": "Calculator",
     "xfce4-terminal.desktop": "Command Prompt",
-    "btop.desktop": "Task Manager",
+    "btop.desktop": "Resource Monitor (btop)",
     "vlc.desktop": "Media Player",
     "org.xfce.ristretto.desktop": "Picture Viewer",
     "org.pulseaudio.pavucontrol.desktop": "Volume Control",
