@@ -1,0 +1,642 @@
+#!/usr/bin/python3
+"""
+firox-bluetooth: the Bluetooth pop-up (click the Bluetooth icon on the
+taskbar), and the pairing helper that asks you to confirm codes.
+
+    firox-bluetooth [toggle|show|hide]   the pop-up
+    firox-bluetooth daemon               just the pairing helper (at login)
+
+The pop-up: Bluetooth on/off, your devices (connected first, with their
+battery level when they report one): click one to connect, disconnect or
+remove it. "Add a device…" looks for devices nearby; click one and Pair.
+"Bluetooth settings…" opens blueman-manager for everything else (sending
+files, audio profiles).
+
+The pairing helper is a BlueZ agent: when a device asks for a PIN, shows
+a code to compare or wants to connect for the first time, it asks you in a
+small window. It isn't registered while blueman-applet runs (the classic
+Bluetooth icon, Settings > Startup Programs), which has its own.
+
+Talks to BlueZ over D-Bus. Styled by the theme's popup.css.
+"""
+
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/lib/firox/python")
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+from firox_popup import Popup, Row, label, scroller, spawn  # noqa: E402
+
+BLUEZ = "org.bluez"
+ADAPTER = "org.bluez.Adapter1"
+DEVICE = "org.bluez.Device1"
+BATTERY = "org.bluez.Battery1"
+AGENT_PATH = "/org/firox/bluetooth/agent"
+AGENT_XML = """
+<node>
+  <interface name="org.bluez.Agent1">
+    <method name="Release"/>
+    <method name="RequestPinCode"><arg type="o" direction="in"/><arg type="s" direction="out"/></method>
+    <method name="DisplayPinCode"><arg type="o" direction="in"/><arg type="s" direction="in"/></method>
+    <method name="RequestPasskey"><arg type="o" direction="in"/><arg type="u" direction="out"/></method>
+    <method name="DisplayPasskey">
+      <arg type="o" direction="in"/><arg type="u" direction="in"/><arg type="q" direction="in"/>
+    </method>
+    <method name="RequestConfirmation"><arg type="o" direction="in"/><arg type="u" direction="in"/></method>
+    <method name="RequestAuthorization"><arg type="o" direction="in"/></method>
+    <method name="AuthorizeService"><arg type="o" direction="in"/><arg type="s" direction="in"/></method>
+    <method name="Cancel"/>
+  </interface>
+</node>
+"""
+
+KIND = {   # BlueZ's Icon property -> what to call it
+    "audio-headset": "Headset", "audio-headphones": "Headphones", "audio-card": "Speaker",
+    "input-mouse": "Mouse", "input-keyboard": "Keyboard", "input-gaming": "Game controller",
+    "input-tablet": "Tablet", "phone": "Phone", "computer": "Computer", "camera-photo": "Camera",
+    "printer": "Printer", "video-display": "Display",
+}
+
+
+def short(message):
+    """One readable line from a D-Bus error (no remote tracebacks)."""
+    lines = [ln.strip() for ln in (message or "").strip().splitlines() if ln.strip()]
+    text = lines[-1] if lines else ""
+    if text.startswith("GDBus.Error:"):
+        text = text.split(" ", 1)[-1] if " " in text else text
+    return text[:100]
+
+
+def notify(title, body="", icon="bluetooth-active"):
+    subprocess.Popen(["notify-send", "-a", "Bluetooth", "-i", icon, title, body],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def blueman_running():
+    """Blueman's applet is (or is about to be) running: it has its own agent."""
+    for argv in (["pgrep", "-f", "blueman-applet"], ["firox-startup", "want", "bluetooth"]):
+        try:
+            if subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=5).returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return False
+
+
+class Bluez:
+    """BlueZ's adapters and devices, kept up to date."""
+
+    def __init__(self, changed):
+        self.changed = changed
+        self.manager = None
+        try:
+            self.manager = Gio.DBusObjectManagerClient.new_for_bus_sync(
+                Gio.BusType.SYSTEM, Gio.DBusObjectManagerClientFlags.NONE, BLUEZ, "/",
+                None, None, None)
+        except GLib.Error as err:
+            print(f"bluetooth: {err.message}", file=sys.stderr)
+            return
+        for sig in ("object-added", "object-removed", "interface-added", "interface-removed",
+                    "interface-proxy-properties-changed", "notify::name-owner"):
+            self.manager.connect(sig, lambda *_: self.changed())
+
+    def running(self):
+        return self.manager is not None and self.manager.get_name_owner() is not None
+
+    def proxies(self, iface):
+        if not self.running():
+            return []
+        out = []
+        for obj in self.manager.get_objects():
+            p = obj.get_interface(iface)
+            if p is not None:
+                out.append(p)
+        return out
+
+    def adapter(self):
+        ads = self.proxies(ADAPTER)
+        return sorted(ads, key=lambda p: p.get_object_path())[0] if ads else None
+
+    @staticmethod
+    def prop(proxy, name, default=None):
+        v = proxy.get_cached_property(name)
+        return v.unpack() if v is not None else default
+
+    def battery(self, path):
+        obj = self.manager.get_object(path) if self.running() else None
+        p = obj.get_interface(BATTERY) if obj is not None else None
+        return self.prop(p, "Percentage") if p is not None else None
+
+    def device(self, path):
+        obj = self.manager.get_object(path) if self.running() else None
+        return obj.get_interface(DEVICE) if obj is not None else None
+
+    def name(self, path):
+        d = self.device(path)
+        return (self.prop(d, "Alias") or self.prop(d, "Name") or "a device") if d else "a device"
+
+    @staticmethod
+    def set_prop(proxy, name, value):
+        Gio.DBusProxy.call(proxy, "org.freedesktop.DBus.Properties.Set",
+                           GLib.Variant("(ssv)", (proxy.get_interface_name(), name, value)),
+                           Gio.DBusCallFlags.NONE, 10000, None, None, None)
+
+    @staticmethod
+    def call(proxy, method, done=None, timeout=30000, args=None):
+        def finish(p, res):
+            err = None
+            try:
+                p.call_finish(res)
+            except GLib.Error as e:
+                err = Gio.DBusError.get_remote_error(e) or "", short(e.message)
+            if done:
+                done(err)
+        proxy.call(method, args, Gio.DBusCallFlags.NONE, timeout, None, finish)
+
+
+# ------------------------------------------------------------------ agent --
+
+class Agent:
+    """Answers BlueZ's pairing questions with small windows."""
+
+    def __init__(self, bluez, before_prompt):
+        self.bluez = bluez
+        self.before_prompt = before_prompt
+        self.bus = None
+        self.reg_id = None
+        self.dialog = None
+        self.registered = False
+
+    def start(self):
+        if self.bus is None:
+            try:
+                self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+            except GLib.Error as err:
+                print(f"bluetooth agent: {err.message}", file=sys.stderr)
+                return
+            info = Gio.DBusNodeInfo.new_for_xml(AGENT_XML).interfaces[0]
+            self.reg_id = self.bus.register_object(AGENT_PATH, info, self.on_call, None, None)
+            Gio.bus_watch_name_on_connection(self.bus, BLUEZ, Gio.BusNameWatcherFlags.NONE,
+                                             lambda *_: self.register(), lambda *_: self.lost())
+
+    def lost(self):
+        self.registered = False
+
+    def register(self):
+        if blueman_running():
+            print("bluetooth agent: blueman-applet is running and pairs devices itself", file=sys.stderr)
+            return
+        mgr = Gio.DBusProxy.new_sync(self.bus, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, None,
+                                     BLUEZ, "/org/bluez", "org.bluez.AgentManager1", None)
+
+        def default(p, res):
+            try:
+                p.call_finish(res)
+                self.registered = True
+            except GLib.Error as err:
+                print(f"bluetooth agent: {err.message}", file=sys.stderr)
+
+        def registered(p, res):
+            try:
+                p.call_finish(res)
+            except GLib.Error as err:
+                if "AlreadyExists" not in err.message:
+                    print(f"bluetooth agent: {err.message}", file=sys.stderr)
+                    return
+            p.call("RequestDefaultAgent", GLib.Variant("(o)", (AGENT_PATH,)), Gio.DBusCallFlags.NONE,
+                   5000, None, default)
+        mgr.call("RegisterAgent", GLib.Variant("(os)", (AGENT_PATH, "KeyboardDisplay")),
+                 Gio.DBusCallFlags.NONE, 5000, None, registered)
+
+    # D-Bus ------------------------------------------------------------------
+
+    def on_call(self, _conn, _sender, _path, _iface, method, params, inv):
+        args = params.unpack()
+        name = self.bluez.name(args[0]) if args else ""
+        if method == "Release":
+            self.registered = False
+            inv.return_value(None)
+        elif method == "Cancel":
+            self.close()
+            inv.return_value(None)
+        elif method == "RequestConfirmation":
+            code = f"{args[1]:06d}"
+            self.ask(inv, f"Pair with {name}?",
+                     f"Check that {name} shows this code, then click Pair:", code, "Pair")
+        elif method == "RequestAuthorization":
+            self.ask(inv, f"Pair with {name}?", f"{name} wants to pair with this computer.", None, "Pair")
+        elif method == "AuthorizeService":
+            dev = self.bluez.device(args[0])
+            if dev is not None and (Bluez.prop(dev, "Trusted") or Bluez.prop(dev, "Paired")):
+                inv.return_value(None)
+            else:
+                self.ask(inv, f"Allow {name} to connect?",
+                         f"{name} wants to use a service on this computer.", None, "Allow")
+        elif method == "RequestPinCode":
+            self.ask_text(inv, name, "s")
+        elif method == "RequestPasskey":
+            self.ask_text(inv, name, "u")
+        elif method == "DisplayPinCode":
+            self.show_code(name, args[1])
+            inv.return_value(None)
+        elif method == "DisplayPasskey":
+            self.show_code(name, f"{args[1]:06d}")
+            inv.return_value(None)
+        else:
+            inv.return_dbus_error("org.bluez.Error.Rejected", "Unknown request")
+
+    @staticmethod
+    def reject(inv):
+        inv.return_dbus_error("org.bluez.Error.Rejected", "Rejected by the user")
+
+    # windows ----------------------------------------------------------------
+
+    def window(self, title):
+        self.close()
+        self.before_prompt()
+        dlg = Gtk.Dialog(title=title)
+        dlg.set_icon_name("bluetooth-active")
+        dlg.set_keep_above(True)
+        dlg.set_resizable(False)
+        dlg.set_position(Gtk.WindowPosition.CENTER)
+        box = dlg.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+        self.dialog = dlg
+        return dlg, box
+
+    def header(self, box, title, text):
+        row = Gtk.Box(spacing=12)
+        row.pack_start(Gtk.Image.new_from_icon_name("bluetooth-active", Gtk.IconSize.DIALOG), False, False, 0)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        t = Gtk.Label(xalign=0)
+        t.set_markup(f"<b>{GLib.markup_escape_text(title)}</b>")
+        texts.pack_start(t, False, False, 0)
+        texts.pack_start(label(text, wrap=True), False, False, 0)
+        row.pack_start(texts, True, True, 0)
+        box.pack_start(row, False, False, 0)
+
+    def code_label(self, box, code):
+        c = Gtk.Label()
+        c.set_markup(f"<span size='xx-large' weight='bold' letter_spacing='4000'>{code}</span>")
+        c.set_selectable(True)
+        box.pack_start(c, False, False, 6)
+
+    def ask(self, inv, title, text, code, yes):
+        dlg, box = self.window(title)
+        self.header(box, title, text)
+        if code:
+            self.code_label(box, code)
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button(yes, Gtk.ResponseType.OK).get_style_context().add_class("suggested-action")
+        dlg.set_default_response(Gtk.ResponseType.OK)
+
+        def answer(d, resp):
+            if resp == Gtk.ResponseType.OK:
+                inv.return_value(None)
+            else:
+                self.reject(inv)
+            self.close()
+        dlg.connect("response", answer)
+        dlg.show_all()
+        dlg.present()
+
+    def ask_text(self, inv, name, kind):
+        title = f"Pair with {name}"
+        dlg, box = self.window(title)
+        self.header(box, title, f"Type the PIN for {name}. If it doesn't show one, try 0000 or 1234 "
+                                "(or look in its manual).")
+        entry = Gtk.Entry(activates_default=True, max_length=16 if kind == "s" else 6)
+        if kind == "u":
+            entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        box.pack_start(entry, False, False, 0)
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button("Pair", Gtk.ResponseType.OK).get_style_context().add_class("suggested-action")
+        dlg.set_default_response(Gtk.ResponseType.OK)
+
+        def answer(d, resp):
+            text = entry.get_text().strip()
+            if resp == Gtk.ResponseType.OK and text:
+                if kind == "u":
+                    try:
+                        inv.return_value(GLib.Variant("(u)", (int(text),)))
+                    except ValueError:
+                        self.reject(inv)
+                else:
+                    inv.return_value(GLib.Variant("(s)", (text,)))
+            else:
+                self.reject(inv)
+            self.close()
+        dlg.connect("response", answer)
+        dlg.show_all()
+        dlg.present()
+
+    def show_code(self, name, code):
+        title = f"Pair with {name}"
+        dlg, box = self.window(title)
+        self.header(box, title, f"Type this code on {name}, then press Enter on it:")
+        self.code_label(box, code)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        dlg.connect("response", lambda *_: self.close())
+        dlg.show_all()
+        dlg.present()
+
+    def close(self):
+        if self.dialog is not None:
+            d, self.dialog = self.dialog, None
+            d.destroy()
+
+
+# ------------------------------------------------------------------ pop-up --
+
+class BluetoothPopup(Popup):
+    def __init__(self, app, bluez):
+        super().__init__(app, "Bluetooth", "firox-bluetooth")
+        self.bluez = bluez
+        self.pending = False
+        self.expanded = None
+        self.busy = {}             # device path -> "Connecting…" etc.
+        self.discovering = False
+
+        self.message = label("", "message", wrap=True)
+        self.message.set_no_show_all(True)
+        self.body.pack_start(self.message, False, False, 0)
+
+        self.mine_title = label("My devices", "section")
+        self.body.pack_start(self.mine_title, False, False, 0)
+        self.mine = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.body.pack_start(scroller(self.mine, 240), False, False, 0)
+
+        self.add_btn = Gtk.Button(label="Add a device…")
+        self.add_btn.set_halign(Gtk.Align.START)
+        self.add_btn.connect("clicked", lambda _b: self.start_discovery())
+        self.body.pack_start(self.add_btn, False, False, 0)
+
+        self.near_title = label("Devices nearby", "section")
+        self.body.pack_start(self.near_title, False, False, 0)
+        self.near = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.near_scroll = scroller(self.near, 220)
+        self.body.pack_start(self.near_scroll, False, False, 0)
+
+        self.link("Bluetooth settings…", "Send files, audio profiles and more (Blueman)",
+                  self.settings)
+
+    def settings(self):
+        self.hide()
+        spawn(["blueman-manager"])
+
+    def say(self, text, error=False):
+        self.message.set_text(text or "")
+        self.message.set_visible(bool(text))
+        ctx = self.message.get_style_context()
+        (ctx.add_class if error else ctx.remove_class)("error")
+
+    def soon(self):
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(250, self._later)
+
+    def _later(self):
+        self.pending = False
+        if self.get_visible():
+            self.refresh()
+        return False
+
+    # ------------------------------------------------------------ refresh --
+
+    def refresh(self):
+        ad = self.bluez.adapter()
+        for box in (self.mine, self.near):
+            for w in box.get_children():
+                w.destroy()
+        if ad is None:
+            self.set_switch(False)
+            self.say("No Bluetooth adapter was found." if self.bluez.running()
+                     else "The Bluetooth service isn't running.", True)
+            for w in (self.mine_title, self.add_btn, self.near_title, self.near_scroll):
+                w.hide()
+            return
+        if self.message.get_style_context().has_class("error") and "adapter" in self.message.get_text():
+            self.say("")
+        powered = bool(Bluez.prop(ad, "Powered"))
+        self.set_switch(True, powered, "Turn Bluetooth on or off")
+        self.mine_title.set_visible(powered)
+        self.add_btn.set_visible(powered and not self.discovering)
+        if not powered:
+            self.mine.get_parent().get_parent().hide()
+            self.near_title.hide()
+            self.near_scroll.hide()
+            self.mine_title.show()
+            self.mine_title.set_text("Bluetooth is off.")
+            return
+        self.mine_title.set_text("My devices")
+        self.mine.get_parent().get_parent().show()
+        ad_path = ad.get_object_path()
+        devs = [d for d in self.bluez.proxies(DEVICE) if Bluez.prop(d, "Adapter") == ad_path]
+        paired = [d for d in devs if Bluez.prop(d, "Paired") or Bluez.prop(d, "Bonded")]
+        nearby = [d for d in devs if d not in paired and Bluez.prop(d, "Name")
+                  and Bluez.prop(d, "RSSI") is not None]
+        if not paired:
+            self.mine.pack_start(label("No devices yet. Click Add a device… to pair one.", "dim",
+                                       wrap=True), False, False, 0)
+        for d in sorted(paired, key=lambda d: (not Bluez.prop(d, "Connected"),
+                                               (Bluez.prop(d, "Alias") or "").lower())):
+            self.mine.pack_start(self.paired_row(d), False, False, 0)
+        self.mine.show_all()
+        self.near_title.set_visible(self.discovering)
+        self.near_scroll.set_visible(self.discovering)
+        if self.discovering:
+            self.near_title.set_text("Devices nearby (looking…)")
+            if not nearby:
+                self.near.pack_start(label("Make sure the device is on and ready to pair "
+                                           "(often by holding its Bluetooth or power button).",
+                                           "dim", wrap=True), False, False, 0)
+            for d in sorted(nearby, key=lambda d: -(Bluez.prop(d, "RSSI") or -999)):
+                self.near.pack_start(self.nearby_row(d), False, False, 0)
+            self.near.show_all()
+
+    def describe(self, d):
+        icon = Bluez.prop(d, "Icon") or "bluetooth-active"
+        shown = {"audio-card": "audio-speakers"}.get(icon, icon)
+        if not Gtk.IconTheme.get_default().has_icon(shown):
+            shown = "bluetooth-active"
+        name = Bluez.prop(d, "Alias") or Bluez.prop(d, "Name") or Bluez.prop(d, "Address")
+        return shown, name, KIND.get(icon, "")
+
+    def paired_row(self, d):
+        path = d.get_object_path()
+        icon, name, kind = self.describe(d)
+        connected = bool(Bluez.prop(d, "Connected"))
+        detail = self.busy.get(path) or ("Connected" if connected else "Not connected")
+        batt = self.bluez.battery(path)
+        if connected and batt is not None:
+            detail += f" · battery {batt}%"
+        row = Row(icon, name, detail, path)
+        if kind:
+            row.set_tooltip_text(kind)
+        if connected:
+            row.button_row(("Remove", lambda: self.remove(d)),
+                           ("Disconnect", lambda: self.disconnect(d)))
+        else:
+            row.button_row(("Remove", lambda: self.remove(d)),
+                           ("Connect", lambda: self.connect_dev(d), "suggested-action"))
+        self.track(row)
+        return row
+
+    def nearby_row(self, d):
+        path = d.get_object_path()
+        icon, name, kind = self.describe(d)
+        row = Row(icon, name, self.busy.get(path) or kind or "Ready to pair", path)
+        row.button_row(("Pair", lambda: self.pair(d), "suggested-action"))
+        self.track(row)
+        return row
+
+    def track(self, row):
+        def expanded(r):
+            self.expanded = r.key
+            for box in (self.mine, self.near):
+                for o in box.get_children():
+                    if isinstance(o, Row) and o is not r:
+                        o.set_expanded(False)
+        row.on_expand = expanded
+        row.on_collapse = lambda r: setattr(self, "expanded", None)
+        if row.key == self.expanded:
+            GLib.idle_add(row.set_expanded, True)
+
+    # ------------------------------------------------------------ actions --
+
+    def on_switch(self, active):
+        ad = self.bluez.adapter()
+        if ad is None:
+            return
+        if active:   # Bluetooth may be blocked (Airplane mode)
+            subprocess.run(["rfkill", "unblock", "bluetooth"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5)
+        Bluez.set_prop(ad, "Powered", GLib.Variant("b", active))
+        if not active:
+            self.discovering = False
+
+    def start_discovery(self):
+        ad = self.bluez.adapter()
+        if ad is None:
+            return
+        self.discovering = True
+        Bluez.call(ad, "StartDiscovery", lambda err: err and self.say(
+            f"Couldn't look for devices: {err[1]}", True))
+        GLib.timeout_add_seconds(60, self.stop_discovery)
+        self.refresh()
+
+    def stop_discovery(self):
+        if self.discovering:
+            self.discovering = False
+            ad = self.bluez.adapter()
+            if ad is not None:
+                Bluez.call(ad, "StopDiscovery")
+            self.soon()
+        return False
+
+    def step(self, d, text):
+        self.busy[d.get_object_path()] = text
+        self.soon()
+
+    def done(self, d, err, ok_text=None, fail_text=None):
+        path = d.get_object_path()
+        self.busy.pop(path, None)
+        name = Bluez.prop(d, "Alias") or "the device"
+        if err:
+            if "AuthenticationCanceled" in err[0] or "Rejected" in err[0]:
+                self.say(f"Pairing with {name} was cancelled.", True)
+            else:
+                self.say((fail_text or "Couldn't connect to {name}") .format(name=name) +
+                         f" ({err[1].split(': ')[-1]})", True)
+        elif ok_text:
+            self.say(ok_text.format(name=name))
+        self.soon()
+
+    def connect_dev(self, d):
+        self.say("")
+        self.step(d, "Connecting…")
+        Bluez.call(d, "Connect", lambda err: self.done(
+            d, err, fail_text="Couldn't connect to {name}. Make sure it's on and in range"))
+
+    def disconnect(self, d):
+        self.step(d, "Disconnecting…")
+        Bluez.call(d, "Disconnect", lambda err: self.done(d, err))
+
+    def remove(self, d):
+        ad = self.bluez.adapter()
+        if ad is None:
+            return
+        name = Bluez.prop(d, "Alias") or "the device"
+        Bluez.call(ad, "RemoveDevice", lambda err: self.done(d, err, f"Removed {name}."),
+                   args=GLib.Variant("(o)", (d.get_object_path(),)))
+        self.expanded = None
+
+    def pair(self, d):
+        self.say("")
+        self.step(d, "Pairing…")
+
+        def paired(err):
+            if err and "AlreadyExists" not in err[0]:
+                self.done(d, err, fail_text="Couldn't pair with {name}")
+                return
+            Bluez.set_prop(d, "Trusted", GLib.Variant("b", True))
+            name = Bluez.prop(d, "Alias") or "the device"
+            notify(f"Paired with {name}", "It will connect automatically from now on.")
+            self.step(d, "Connecting…")
+            Bluez.call(d, "Connect", lambda err2: self.done(
+                d, err2, "{name} is ready to use.",
+                fail_text="Paired with {name}, but couldn't connect yet"))
+            self.expanded = d.get_object_path()
+        Bluez.call(d, "Pair", paired, timeout=90000)
+
+    def open(self):
+        self.say("")
+        super().open()
+
+    def do_hide(self):
+        self.stop_discovery()
+        Gtk.Window.do_hide(self)
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Bluetooth",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+        self.bluez = None
+        self.agent = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        self.bluez = Bluez(self.changed)
+        self.agent = Agent(self.bluez, lambda: self.win and self.win.hide())
+        self.agent.start()
+        self.hold()          # keep answering pairing requests
+
+    def changed(self):
+        if self.win is not None:
+            self.win.soon()
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        cmd = args[0] if args else "toggle"
+        if cmd == "daemon":
+            return 0
+        if self.win is None:
+            self.win = BluetoothPopup(self, self.bluez)
+        if cmd == "hide" or (cmd == "toggle" and self.win.get_visible()):
+            self.win.hide()
+        else:
+            self.win.open()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

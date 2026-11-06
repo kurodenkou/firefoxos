@@ -1,0 +1,554 @@
+#!/usr/bin/python3
+"""
+firox-network: the network pop-up (click the network icon on the taskbar).
+
+    firox-network [toggle|show|hide]
+
+Wi-Fi on/off, the networks in range (strongest first, the one you're on at
+the top): click one to connect, typing its password if it needs one, or to
+disconnect or forget it. Also: your wired connection, VPNs (switch them on
+and off), Airplane mode, "Hidden network…" and "Network Connections…"
+(nm-connection-editor) for everything else, such as networks that need a
+username and certificate.
+
+Talks to NetworkManager through libnm. Closes on Esc or a click elsewhere.
+Styled by the theme's popup.css.
+"""
+
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/lib/firox/python")
+
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+try:
+    gi.require_version("NM", "1.0")
+    from gi.repository import NM  # noqa: E402
+except (ValueError, ImportError):
+    NM = None
+
+from firox_popup import Popup, Row, label, scroller, spawn  # noqa: E402
+
+if NM is not None:
+    ApFlags = getattr(NM, "80211ApFlags")
+    ApSec = getattr(NM, "80211ApSecurityFlags")
+
+
+def signal_icon(strength):
+    for limit, name in ((75, "excellent"), (50, "good"), (25, "ok"), (1, "weak")):
+        if strength >= limit:
+            return f"network-wireless-signal-{name}-symbolic"
+    return "network-wireless-signal-none-symbolic"
+
+
+def ssid_of(ap):
+    b = ap.get_ssid()
+    if b is None:
+        return ""
+    return NM.utils_ssid_to_utf8(b.get_data()) or ""
+
+
+def security(ap):
+    """None (open), "psk", "sae", "wep" or "enterprise"."""
+    sec = ap.get_wpa_flags() | ap.get_rsn_flags()
+    if sec & ApSec.KEY_MGMT_802_1X:
+        return "enterprise"
+    if sec & ApSec.KEY_MGMT_PSK:
+        return "psk"
+    if sec & getattr(ApSec, "KEY_MGMT_SAE", 0):
+        return "sae"
+    if ap.get_flags() & ApFlags.PRIVACY:
+        return "wep"
+    return None
+
+
+def saved_for(ap, conns):
+    """Saved connections for AP. (AccessPoint.filter_connections would do,
+    but PyGObject frees its result twice and crashes.)"""
+    return [c for c in conns if c.get_connection_type() == "802-11-wireless" and ap.connection_valid(c)]
+
+
+def rfkill():
+    """[(type, soft_blocked)] for the radios on this computer."""
+    try:
+        out = subprocess.run(["rfkill", "-n", "-o", "TYPE,SOFT"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [(p[0], p[1] == "blocked") for p in (line.split() for line in out.splitlines()) if len(p) == 2]
+
+
+class NetworkPopup(Popup):
+    def __init__(self, app):
+        super().__init__(app, "Network", "firox-network")
+        self.client = None
+        self.pending = False
+        self.expanded = None       # key of the row that's open
+        self.failed = set()        # SSIDs whose last connection attempt failed
+        self.busy = {}             # SSID/key -> "Connecting…" while it is
+        self.watched = set()
+
+        self.message = label("", "message", wrap=True)
+        self.message.set_no_show_all(True)
+        self.body.pack_start(self.message, False, False, 0)
+
+        self.wired = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.body.pack_start(self.wired, False, False, 0)
+
+        self.wifi_title = label("Wi-Fi networks", "section")
+        self.body.pack_start(self.wifi_title, False, False, 0)
+        self.wifi = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.wifi_scroll = scroller(self.wifi, 320)
+        self.body.pack_start(self.wifi_scroll, True, True, 0)
+
+        self.vpn_title = label("VPN", "section")
+        self.body.pack_start(self.vpn_title, False, False, 0)
+        self.vpn = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.body.pack_start(self.vpn, False, False, 0)
+
+        self.airplane = Gtk.CheckButton(label="Airplane mode")
+        self.airplane.set_tooltip_text("Turn off Wi-Fi, Bluetooth and mobile broadband")
+        self.airplane_handler = self.airplane.connect("toggled", self.on_airplane)
+        self.body.pack_start(self.airplane, False, False, 0)
+
+        self.link("Hidden network…", "Join a network that doesn't show its name",
+                  lambda: self.editor("--create", "--type=802-11-wireless"))
+        self.link("Network Connections…", "All connection settings: VPNs, fixed addresses, "
+                  "networks that need a username and certificate", lambda: self.editor())
+
+        try:
+            self.client = NM.Client.new(None) if NM else None
+        except GLib.Error as err:
+            print(f"network: {err.message}", file=sys.stderr)
+        if self.client is not None:
+            for sig in ("device-added", "device-removed", "connection-added", "connection-removed",
+                        "notify::active-connections", "notify::wireless-enabled",
+                        "notify::wireless-hardware-enabled", "notify::nm-running"):
+                self.client.connect(sig, lambda *_: self.soon())
+
+    # ------------------------------------------------------------ helpers --
+
+    def editor(self, *args):
+        self.hide()
+        spawn(["nm-connection-editor", *args])
+
+    def say(self, text, error=False):
+        self.message.set_text(text or "")
+        self.message.set_visible(bool(text))
+        ctx = self.message.get_style_context()
+        (ctx.add_class if error else ctx.remove_class)("error")
+
+    def soon(self):
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(250, self._refresh_later)
+
+    def _refresh_later(self):
+        self.pending = False
+        if self.get_visible():
+            self.refresh()
+        return False
+
+    def wifi_devices(self):
+        return [d for d in self.client.get_devices() if isinstance(d, NM.DeviceWifi)
+                and d.get_state() != NM.DeviceState.UNMANAGED]
+
+    def watch(self, dev):
+        if dev.get_path() in self.watched:
+            return
+        self.watched.add(dev.get_path())
+        for sig in ("access-point-added", "access-point-removed", "notify::active-access-point",
+                    "state-changed"):
+            dev.connect(sig, lambda *_: self.soon())
+
+    def connections(self):
+        return [c for c in self.client.get_connections() if c is not None]
+
+    def typing(self):
+        focus = self.get_focus()
+        return isinstance(focus, Gtk.Entry) and bool(focus.get_text())
+
+    # ------------------------------------------------------------ refresh --
+
+    def refresh(self):
+        if self.client is None or not self.client.get_nm_running():
+            self.title.set_text("Network")
+            self.set_switch(False)
+            for box in (self.wired, self.wifi, self.vpn):
+                for w in box.get_children():
+                    w.destroy()
+            self.say("NetworkManager isn't running, so networks can't be shown.", True)
+            for w in (self.wifi_title, self.wifi_scroll, self.vpn_title):
+                w.hide()
+            return
+        if self.typing():          # don't pull the password box away
+            return
+        wifi_devs = self.wifi_devices()
+        for d in wifi_devs:
+            self.watch(d)
+        on = self.client.wireless_get_enabled()
+        hw = self.client.wireless_hardware_get_enabled()
+        self.title.set_text("Wi-Fi" if wifi_devs else "Network")
+        self.set_switch(bool(wifi_devs) and hw, on, "Turn Wi-Fi on or off")
+        self.fill_wired()
+        self.fill_wifi(wifi_devs, on and hw)
+        self.fill_vpn()
+        radios = rfkill()
+        self.airplane.set_visible(bool(radios))
+        with self.airplane.handler_block(self.airplane_handler):
+            self.airplane.set_active(bool(radios) and all(b for _t, b in radios))
+
+    def fill_wired(self):
+        for w in self.wired.get_children():
+            w.destroy()
+        for dev in self.client.get_devices():
+            if not isinstance(dev, NM.DeviceEthernet) or dev.get_state() == NM.DeviceState.UNMANAGED:
+                continue
+            st = dev.get_state()
+            ac = dev.get_active_connection()
+            if st == NM.DeviceState.ACTIVATED:
+                icon, detail = "network-wired-symbolic", "Connected"
+            elif st == NM.DeviceState.UNAVAILABLE:
+                icon, detail = "network-wired-disconnected-symbolic", "Cable unplugged"
+            elif NM.DeviceState.PREPARE <= st < NM.DeviceState.ACTIVATED:
+                icon, detail = "network-wired-acquiring-symbolic", "Connecting…"
+            else:
+                icon, detail = "network-wired-disconnected-symbolic", "Not connected"
+            name = ac.get_id() if ac else "Ethernet"
+            key = "wired:" + dev.get_iface()
+            row = Row(icon, name, detail, key)
+            if st == NM.DeviceState.ACTIVATED:
+                row.button_row(("Disconnect", lambda d=dev: self.disconnect_device(d)))
+            elif st != NM.DeviceState.UNAVAILABLE:
+                row.button_row(("Connect", lambda d=dev: self.connect_device(d), "suggested-action"))
+            self.add_row(self.wired, row)
+        self.wired.show_all()
+
+    def fill_wifi(self, devs, on):
+        for w in self.wifi.get_children():
+            w.destroy()
+        self.wifi_title.set_visible(bool(devs))
+        self.wifi_scroll.set_visible(bool(devs))
+        if not devs:
+            return
+        if not on:
+            self.wifi.pack_start(label("Wi-Fi is off.", "dim"), False, False, 0)
+            self.wifi.show_all()
+            return
+        conns = self.connections()
+        best = {}
+        active = {}
+        for dev in devs:
+            act = dev.get_active_access_point()
+            for ap in dev.get_access_points():
+                ssid = ssid_of(ap)
+                if not ssid:
+                    continue
+                if act is not None and ap.get_path() == act.get_path():
+                    active[ssid] = dev
+                if ssid not in best or ap.get_strength() > best[ssid][1].get_strength():
+                    best[ssid] = (dev, ap)
+        if not best:
+            self.wifi.pack_start(label("Looking for networks…", "dim"), False, False, 0)
+        connecting = {}
+        for dev in devs:
+            ac = dev.get_active_connection()
+            if ac and ac.get_state() == NM.ActiveConnectionState.ACTIVATING:
+                connecting[ac.get_id()] = True
+
+        def order(item):
+            ssid, (dev, ap) = item
+            saved = bool(saved_for(ap, conns))
+            return (ssid not in active, not saved, -ap.get_strength(), ssid.lower())
+
+        for ssid, (dev, ap) in sorted(best.items(), key=order):
+            saved = saved_for(ap, conns)
+            sec = security(ap)
+            if ssid in active:
+                ac = active[ssid].get_active_connection()
+                detail = "Connecting…" if ac and ac.get_state() == NM.ActiveConnectionState.ACTIVATING \
+                    else "Connected"
+            elif ssid in self.busy:
+                detail = self.busy[ssid]
+            elif saved:
+                detail = "Saved"
+            else:
+                detail = {None: "Open", "enterprise": "Needs a username"}.get(sec, "Secured")
+            row = Row(signal_icon(ap.get_strength()), ssid, detail, "wifi:" + ssid,
+                      badge="network-wireless-encrypted-symbolic" if sec else None)
+            row.set_tooltip_text(f"Signal {ap.get_strength()}%")
+            if ssid in active:
+                buttons = [("Disconnect", lambda d=active[ssid]: self.disconnect_device(d))]
+                if saved:
+                    buttons.append(("Forget", lambda c=saved[0], s=ssid: self.forget(c, s)))
+                row.button_row(*buttons)
+            elif sec == "enterprise" and not saved:
+                row.actions.pack_start(label("This network needs a username or certificate. Set it "
+                                             "up in Network Connections.", "dim", wrap=True),
+                                       False, False, 0)
+                row.button_row(("Set up…", lambda: self.editor("--create", "--type=802-11-wireless"),
+                                "suggested-action"))
+            else:
+                entry = None
+                if sec and (not saved or ssid in self.failed):
+                    entry = Gtk.Entry(placeholder_text="Password", visibility=False)
+                    entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+                    entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, "view-reveal-symbolic")
+                    entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, "Show the password")
+                    entry.connect("icon-press", lambda e, *_: e.set_visibility(not e.get_visibility()))
+                    entry.connect("activate", lambda _e, s=ssid, row=row: self.connect_wifi(s, row))
+                    row.actions.pack_start(entry, False, False, 0)
+                row.entry = entry
+                buttons = [("Connect", lambda s=ssid, row=row: self.connect_wifi(s, row), "suggested-action")]
+                if saved:
+                    buttons.insert(0, ("Forget", lambda c=saved[0], s=ssid: self.forget(c, s)))
+                row.button_row(*buttons)
+            self.add_row(self.wifi, row)
+        self.wifi.show_all()
+
+    def fill_vpn(self):
+        for w in self.vpn.get_children():
+            w.destroy()
+        vpns = [c for c in self.connections()
+                if c.get_connection_type() in ("vpn", "wireguard")]
+        self.vpn_title.set_visible(bool(vpns))
+        actives = {ac.get_uuid(): ac for ac in self.client.get_active_connections()}
+        for c in sorted(vpns, key=lambda c: c.get_id().lower()):
+            ac = actives.get(c.get_uuid())
+            if ac and ac.get_state() == NM.ActiveConnectionState.ACTIVATED:
+                detail = "Connected"
+            elif ac:
+                detail = "Connecting…"
+            else:
+                detail = self.busy.get("vpn:" + c.get_uuid(), "Off")
+            row = Row("network-vpn-symbolic", c.get_id(), detail, "vpn:" + c.get_uuid())
+            if ac:
+                row.button_row(("Disconnect", lambda a=ac: self.deactivate(a)))
+            else:
+                row.button_row(("Connect", lambda c=c: self.connect_vpn(c), "suggested-action"))
+            self.add_row(self.vpn, row)
+        self.vpn.show_all()
+
+    def add_row(self, box, row):
+        def expanded(r):
+            self.expanded = r.key
+            for container in (self.wired, self.wifi, self.vpn):
+                for o in container.get_children():
+                    if isinstance(o, Row) and o is not r:
+                        o.set_expanded(False)
+            entry = getattr(r, "entry", None)
+            if entry is not None:
+                GLib.idle_add(entry.grab_focus)
+        row.on_expand = expanded
+        row.on_collapse = lambda r: setattr(self, "expanded", None)
+        box.pack_start(row, False, False, 0)
+        if row.key == self.expanded:
+            GLib.idle_add(row.set_expanded, True)
+
+    # ------------------------------------------------------------ actions --
+
+    def on_switch(self, active):
+        try:
+            self.client.dbus_set_property(NM.DBUS_PATH, NM.DBUS_INTERFACE, "WirelessEnabled",
+                                          GLib.Variant("b", active), -1, None, None, None)
+        except (AttributeError, TypeError):
+            self.client.wireless_set_enabled(active)
+        if active:
+            GLib.timeout_add_seconds(2, self.scan)
+
+    def on_airplane(self, cb):
+        subprocess.run(["rfkill", "block" if cb.get_active() else "unblock", "all"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        self.soon()
+
+    def scan(self):
+        if self.client is None:
+            return False
+        for dev in self.wifi_devices():
+            dev.request_scan_async(None, lambda d, res: self._scan_done(d, res))
+        return False
+
+    @staticmethod
+    def _scan_done(dev, res):
+        try:
+            dev.request_scan_finish(res)
+        except GLib.Error:
+            pass                    # scanning too often: it rescans by itself
+
+    def find_ap(self, ssid):
+        best = None
+        for dev in self.wifi_devices():
+            for ap in dev.get_access_points():
+                if ssid_of(ap) == ssid and (best is None or ap.get_strength() > best[1].get_strength()):
+                    best = (dev, ap)
+        return best
+
+    def connect_wifi(self, ssid, row):
+        found = self.find_ap(ssid)
+        if found is None:
+            self.say(f"{ssid} is out of range.", True)
+            return
+        dev, ap = found
+        password = row.entry.get_text() if getattr(row, "entry", None) is not None else ""
+        if row.entry is not None and not password:
+            row.entry.grab_focus()
+            return
+        saved = saved_for(ap, self.connections())
+        self.busy[ssid] = "Connecting…"
+        self.say(f"Connecting to {ssid}…")
+        if row.entry is not None:
+            row.entry.set_text("")      # so the list may refresh
+        if saved:
+            conn = saved[0]
+            if password:
+                sec = conn.get_setting_wireless_security()
+                if sec is not None:
+                    if sec.get_key_mgmt() == "none":
+                        sec.set_property("wep-key0", password)
+                    else:
+                        sec.set_property("psk", password)
+                    conn.commit_changes_async(True, None, lambda c, res: self._committed(
+                        c, res, dev, ap, ssid))
+                    return
+            self.client.activate_connection_async(conn, dev, ap.get_path(), None,
+                                                  self._started, (ssid, False))
+            return
+        conn = NM.SimpleConnection.new()
+        s_con = NM.SettingConnection.new()
+        s_con.set_property(NM.SETTING_CONNECTION_ID, ssid)
+        s_con.set_property(NM.SETTING_CONNECTION_TYPE, "802-11-wireless")
+        conn.add_setting(s_con)
+        s_wifi = NM.SettingWireless.new()
+        s_wifi.set_property(NM.SETTING_WIRELESS_SSID, GLib.Bytes.new(ssid.encode()))
+        conn.add_setting(s_wifi)
+        sec = security(ap)
+        if sec:
+            s_sec = NM.SettingWirelessSecurity.new()
+            if sec == "wep":
+                s_sec.set_property("key-mgmt", "none")
+                s_sec.set_property("wep-key0", password)
+                s_sec.set_property("wep-key-type", NM.WepKeyType.PASSPHRASE
+                                   if len(password) not in (5, 10, 13, 26) else NM.WepKeyType.KEY)
+            else:
+                s_sec.set_property("key-mgmt", "sae" if sec == "sae" else "wpa-psk")
+                s_sec.set_property("psk", password)
+            conn.add_setting(s_sec)
+        self.client.add_and_activate_connection_async(conn, dev, ap.get_path(), None,
+                                                      self._started, (ssid, True))
+
+    def _committed(self, conn, res, dev, ap, ssid):
+        try:
+            conn.commit_changes_finish(res)
+        except GLib.Error as err:
+            self.fail(ssid, f"Couldn't save the password: {err.message}")
+            return
+        self.client.activate_connection_async(conn, dev, ap.get_path(), None,
+                                              self._started, (ssid, False))
+
+    def _started(self, client, res, data):
+        ssid, new = data
+        try:
+            if new:
+                ac = client.add_and_activate_connection_finish(res)
+            else:
+                ac = client.activate_connection_finish(res)
+        except GLib.Error as err:
+            self.fail(ssid, f"Couldn't connect to {ssid}: {err.message}")
+            return
+        ac.connect("notify::state", lambda a, _p: self._state(a, ssid, new))
+        self._state(ac, ssid, new)
+
+    def _state(self, ac, ssid, new):
+        st = ac.get_state()
+        if st == NM.ActiveConnectionState.ACTIVATED:
+            self.busy.pop(ssid, None)
+            self.failed.discard(ssid)
+            self.say(f"Connected to {ssid}.")
+            GLib.timeout_add_seconds(3, lambda: self.say("") or False)
+            self.expanded = None
+            self.soon()
+        elif st == NM.ActiveConnectionState.DEACTIVATED:
+            reason = ac.get_state_reason()
+            wrong = reason in (NM.ActiveConnectionStateReason.NO_SECRETS,
+                               NM.ActiveConnectionStateReason.LOGIN_FAILED)
+            conn = ac.get_connection()
+            if new and conn is not None:     # don't keep a network with a wrong password
+                conn.delete_async(None, None, None)
+            self.fail(ssid, f"Couldn't connect to {ssid}." +
+                      (" Check the password and try again." if wrong else ""))
+
+    def fail(self, ssid, text):
+        self.busy.pop(ssid, None)
+        self.failed.add(ssid)
+        self.expanded = "wifi:" + ssid
+        self.say(text, True)
+        self.soon()
+
+    def forget(self, conn, ssid):
+        self.failed.discard(ssid)
+        conn.delete_async(None, None, None)
+        self.say(f"Forgot {ssid}.")
+        self.expanded = None
+
+    def disconnect_device(self, dev):
+        dev.disconnect_async(None, None, None)
+        self.expanded = None
+
+    def connect_device(self, dev):
+        self.client.activate_connection_async(None, dev, None, None, None, None)
+        self.expanded = None
+
+    def deactivate(self, ac):
+        self.client.deactivate_connection_async(ac, None, None, None)
+        self.expanded = None
+
+    def connect_vpn(self, conn):
+        key = "vpn:" + conn.get_uuid()
+        self.busy[key] = "Connecting…"
+        self.say(f"Connecting to {conn.get_id()}…")
+
+        def done(client, res, _data):
+            self.busy.pop(key, None)
+            try:
+                ac = client.activate_connection_finish(res)
+            except GLib.Error as err:
+                self.say(f"Couldn't connect to {conn.get_id()}: {err.message}. If it needs a "
+                         "password, save it in Network Connections.", True)
+                self.soon()
+                return
+            ac.connect("notify::state", lambda *_: self.soon())
+            self.say("")
+        self.client.activate_connection_async(conn, None, None, None, done, None)
+        self.expanded = None
+
+    def open(self):
+        self.say("")
+        self.failed.clear()
+        super().open()
+        self.scan()
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Network",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.win = None
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        cmd = args[0] if args else "toggle"
+        if self.win is None:
+            self.win = NetworkPopup(self)
+        if cmd == "hide" or (cmd == "toggle" and self.win.get_visible()):
+            self.win.hide()
+        else:
+            self.win.open()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

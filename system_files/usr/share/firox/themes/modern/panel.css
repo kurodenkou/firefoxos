@@ -97,6 +97,8 @@ button.quick-launch:hover { background-color: rgba(255, 255, 255, 0.12); }
 #idle_inhibitor.deactivated { color: #a8a8a8; }
 #battery.warning { color: #e0c070; }
 #battery.critical { color: #e08080; }
+#network, #bluetooth { padding: 0 5px; }
+#network.disconnected, #bluetooth.off { color: #a8a8a8; }
 #clock { padding: 0 12px 0 8px; }
 
 #custom-notifications.read, #custom-notifications.dnd { color: #a8a8a8; }

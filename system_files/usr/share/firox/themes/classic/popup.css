@@ -1,0 +1,56 @@
+/* Wi-Fi and Bluetooth pop-ups (firox-network, firox-bluetooth), Classic look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: Tahoma, "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    margin: 0 4px 4px 0;
+    min-width: 300px;
+    background-color: #ece9d8;
+    border: 1px solid #0831d9;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.45);
+}
+#panel-header {
+    border-radius: 7px 7px 0 0;
+    padding: 6px 10px;
+    background-image: linear-gradient(to bottom,
+        #1868ce 0%, #4a8ae8 6%, #1c64d2 14%, #1a5fcf 80%, #1457c4 100%);
+}
+#panel-header .title { color: #ffffff; font-size: 13px; font-weight: bold; }
+#body { padding: 8px 10px; color: #000000; }
+#body label { color: #000000; }
+#body .section { color: #00136b; font-weight: bold; margin: 4px 4px 0 4px; }
+#body .dim { color: #555555; }
+#body .message { padding: 4px 6px; background-color: #ffffe1; border: 1px solid #a0a0a0; }
+#body .message.error { background-color: #fff0f0; border-color: #d08080; color: #800000; }
+
+.row { border: 1px solid transparent; border-radius: 3px; }
+.row-top { padding: 4px 6px; }
+.row:hover { background-color: #ffffff; border-color: #c4d5f0; }
+.row.expanded { background-color: #ffffff; border-color: #316ac5; }
+.row .name { color: #000000; }
+.row image { color: #00136b; }
+.row .badge { color: #555555; }
+.row-actions { padding: 0 6px 6px 38px; }
+
+#body button {
+    padding: 2px 12px;
+    background-image: linear-gradient(to bottom, #ffffff, #ece9d8);
+    border: 1px solid #003c74;
+    border-radius: 3px;
+    color: #000000;
+}
+#body button:hover { border-color: #e5a033; }
+#body button label { color: #000000; }
+#body entry { background-color: #ffffff; color: #000000; border: 1px solid #7f9db9; border-radius: 0; }
+
+#panel-header switch { background-color: #ffffff; border: 1px solid #003c74; }
+#panel-header switch:checked { background-color: #6fd36f; }
+#panel-header switch slider { background-image: linear-gradient(to bottom, #ffffff, #dce6f5); border: 1px solid #1c5180; }
+
+#panel-footer { padding: 4px 8px; background-color: #d3e5fa; border-top: 1px solid #95bdee; }
+#panel-footer button.link { background: transparent; background-image: none; border: none; box-shadow: none; padding: 2px 6px; }
+#panel-footer button.link label { color: #0b3cb5; }
+#panel-footer button.link:hover label { text-decoration: underline; }
+scrolledwindow, viewport { background: transparent; border: none; }

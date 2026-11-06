@@ -14,9 +14,9 @@ button for Restore / Minimize / Maximize / Close, Minimize/Close group, or Pin
 to Quick Launch. Drag buttons and Quick Launch icons to rearrange them.
 Right-click an empty part of the taskbar for its settings.
 
-The notification area holds app icons (StatusNotifierItem, e.g. network and
-Bluetooth), keep the screen on, volume, battery, a waiting update, the
-notification bell and the clock.
+The notification area holds app icons (StatusNotifierItem), keep the screen
+on, network (firox-network), Bluetooth (firox-bluetooth), volume, battery,
+a waiting update, the notification bell and the clock.
 
 Styled by the theme's panel.css (/usr/share/firox/themes/NAME/panel.css),
 reloaded when the theme changes; add your own rules in
@@ -917,6 +917,7 @@ class Indicator:
     def __init__(self, name):
         self.name = name
         self.text = ""
+        self.icon = None          # a symbolic icon name, shown instead of / before the text
         self.tip = ""
         self.classes = set()
         self.visible = True
@@ -927,7 +928,15 @@ class Indicator:
         btn.set_name(self.name)
         btn.set_relief(Gtk.ReliefStyle.NONE)
         btn.set_focus_on_click(False)
-        btn.add(Gtk.Label())
+        box = Gtk.Box(spacing=3)
+        btn.firox_image = Gtk.Image()
+        btn.firox_image.set_no_show_all(True)
+        btn.firox_label = Gtk.Label()
+        btn.firox_label.set_no_show_all(True)
+        box.pack_start(btn.firox_image, False, False, 0)
+        box.pack_start(btn.firox_label, False, False, 0)
+        box.show()
+        btn.add(box)
         btn.add_events(Gdk.EventMask.SCROLL_MASK)
         btn.connect("button-press-event", lambda b, e: self.on_press(b, e) if e.type == Gdk.EventType.BUTTON_PRESS else True)
         btn.connect("scroll-event", lambda b, e: self.on_scroll(e) or True)
@@ -936,7 +945,9 @@ class Indicator:
         self.paint(btn)
         return btn
 
-    def set(self, text=None, tip=None, classes=None, visible=None):
+    def set(self, text=None, tip=None, classes=None, visible=None, icon=None):
+        if icon is not None:
+            self.icon = icon or None
         if text is not None:
             self.text = text
         if tip is not None:
@@ -949,7 +960,12 @@ class Indicator:
             self.paint(b)
 
     def paint(self, btn):
-        btn.get_child().set_text(self.text)
+        btn.firox_label.set_text(self.text)
+        btn.firox_label.set_visible(bool(self.text))
+        if self.icon:
+            btn.firox_image.set_from_icon_name(self.icon, Gtk.IconSize.MENU)
+            btn.firox_image.set_pixel_size(16)
+        btn.firox_image.set_visible(bool(self.icon))
         btn.set_tooltip_text(self.tip or None)
         ctx = btn.get_style_context()
         for cls in getattr(btn, "firox_classes", set()) - self.classes:
@@ -958,7 +974,6 @@ class Indicator:
             ctx.add_class(cls)
         btn.firox_classes = set(self.classes)
         btn.set_no_show_all(True)
-        btn.get_child().show()
         btn.set_visible(self.visible)
 
     def on_press(self, _btn, event):
@@ -1126,6 +1141,159 @@ class Battery(Indicator):
 
     def right(self):
         spawn(["firox-control-panel", "power"])
+
+
+class Network(Indicator):
+    """Wi-Fi / wired status from NetworkManager (libnm); click for firox-network."""
+
+    def __init__(self):
+        super().__init__("network")
+        self.client = None
+        self.pending = False
+        self.watched = set()
+        try:
+            gi.require_version("NM", "1.0")
+            from gi.repository import NM
+            self.NM = NM
+            self.client = NM.Client.new(None)
+        except (ValueError, ImportError, GLib.Error) as err:
+            print(f"panel: no network status: {err}", file=sys.stderr)
+            self.set(visible=False)
+            return
+        for sig in ("notify::primary-connection", "notify::active-connections", "notify::state",
+                    "notify::wireless-enabled", "notify::networking-enabled", "notify::nm-running",
+                    "device-added", "device-removed"):
+            self.client.connect(sig, lambda *_: self.soon())
+        GLib.timeout_add_seconds(15, lambda: self.update() or True)   # signal strength
+        self.update()
+
+    def soon(self):
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(200, self.update)
+
+    def update(self):
+        self.pending = False
+        NM = self.NM
+        c = self.client
+        if c is None or not c.get_nm_running():
+            self.set(visible=False)
+            return False
+        devs = [d for d in c.get_devices() if d.get_state() != NM.DeviceState.UNMANAGED]
+        wifi = [d for d in devs if isinstance(d, NM.DeviceWifi)]
+        for d in wifi:
+            if d.get_path() not in self.watched:
+                self.watched.add(d.get_path())
+                d.connect("notify::active-access-point", lambda *_: self.soon())
+        airplane = wifi and not c.wireless_get_enabled() and not any(
+            isinstance(d, NM.DeviceEthernet) and d.get_state() == NM.DeviceState.ACTIVATED for d in devs)
+        primary = c.get_primary_connection()
+        activating = c.get_activating_connection()
+        vpn = any(ac.get_vpn() or ac.get_connection_type() == "wireguard"
+                  for ac in c.get_active_connections()
+                  if ac.get_state() == NM.ActiveConnectionState.ACTIVATED)
+        tip_vpn = "\nVPN on" if vpn else ""
+        tail = "\nClick for networks"
+        if primary is not None and primary.get_state() == NM.ActiveConnectionState.ACTIVATED:
+            kind = primary.get_connection_type()
+            dev = (primary.get_devices() or [None])[0]
+            if kind == "802-11-wireless" and isinstance(dev, NM.DeviceWifi) and dev.get_active_access_point():
+                ap = dev.get_active_access_point()
+                strength = ap.get_strength()
+                level = next(n for lim, n in ((75, "excellent"), (50, "good"), (25, "ok"), (1, "weak"),
+                                              (-1, "none")) if strength >= lim)
+                self.set("", f"Connected to {primary.get_id()} (signal {strength}%){tip_vpn}{tail}",
+                         ["connected"], True, f"network-wireless-signal-{level}-symbolic")
+            elif kind in ("vpn", "wireguard"):
+                self.set("", f"Connected ({primary.get_id()}){tip_vpn}{tail}", ["connected"], True,
+                         "network-vpn-symbolic")
+            else:
+                self.set("", f"Connected to {primary.get_id()}{tip_vpn}{tail}", ["connected"], True,
+                         "network-wired-symbolic")
+        elif activating is not None:
+            wl = activating.get_connection_type() == "802-11-wireless"
+            self.set("", f"Connecting to {activating.get_id()}…{tail}", ["connecting"], True,
+                     "network-wireless-acquiring-symbolic" if wl else "network-wired-acquiring-symbolic")
+        elif airplane:
+            self.set("", f"Wi-Fi is off{tail}", ["disconnected"], True, "network-wireless-disabled-symbolic")
+        elif wifi:
+            self.set("", f"Not connected{tail}", ["disconnected"], True, "network-wireless-offline-symbolic")
+        elif devs:
+            self.set("", f"Not connected{tail}", ["disconnected"], True, "network-wired-disconnected-symbolic")
+        else:
+            self.set(visible=False)
+        return False
+
+    def left(self):
+        spawn(["firox-network", "toggle"])
+
+    def right(self):
+        spawn(["nm-connection-editor"])
+
+
+class Bluetooth(Indicator):
+    """Shown when the computer has Bluetooth; click for firox-bluetooth."""
+
+    def __init__(self):
+        super().__init__("bluetooth")
+        self.pending = False
+        self.manager = None
+        self.set(visible=False)
+        try:
+            self.manager = Gio.DBusObjectManagerClient.new_for_bus_sync(
+                Gio.BusType.SYSTEM, Gio.DBusObjectManagerClientFlags.NONE, "org.bluez", "/",
+                None, None, None)
+        except GLib.Error as err:
+            print(f"panel: no Bluetooth status: {err.message}", file=sys.stderr)
+            return
+        for sig in ("object-added", "object-removed", "interface-added", "interface-removed",
+                    "interface-proxy-properties-changed", "notify::name-owner"):
+            self.manager.connect(sig, lambda *_: self.soon())
+        self.update()
+
+    def soon(self):
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(200, self.update)
+
+    def update(self):
+        self.pending = False
+        m = self.manager
+        if m is None or m.get_name_owner() is None:
+            self.set(visible=False)
+            return False
+        adapters, connected = [], []
+        for obj in m.get_objects():
+            a = obj.get_interface("org.bluez.Adapter1")
+            if a is not None:
+                adapters.append(a)
+            d = obj.get_interface("org.bluez.Device1")
+            if d is not None:
+                v = d.get_cached_property("Connected")
+                if v is not None and v.unpack():
+                    name = d.get_cached_property("Alias")
+                    connected.append(name.unpack() if name else "a device")
+        if not adapters:
+            self.set(visible=False)
+            return False
+        pw = adapters[0].get_cached_property("Powered")
+        on = bool(pw and pw.unpack())
+        if not on:
+            self.set("", "Bluetooth is off\nClick to turn it on or pair a device", ["off"], True,
+                     "bluetooth-disabled-symbolic")
+        elif connected:
+            self.set("", "Connected to " + ", ".join(connected) + "\nClick for Bluetooth devices",
+                     ["connected"], True, "bluetooth-active-symbolic")
+        else:
+            self.set("", "Bluetooth is on\nClick to connect or pair a device", ["on"], True,
+                     "bluetooth-active-symbolic")
+        return False
+
+    def left(self):
+        spawn(["firox-bluetooth", "toggle"])
+
+    def right(self):
+        spawn(["blueman-manager"])
 
 
 class Updates(Indicator):
@@ -1462,7 +1630,8 @@ class Panel:
             cant_run(str(err))
         self.tray = Tray(self)
         self.clock = Clock(self.settings.get("SECONDS", "0") != "0")
-        self.indicators = [Awake(), Volume(), Battery(), Updates(), Bell(), self.clock]
+        self.indicators = [Awake(), Network(), Bluetooth(), Volume(), Battery(), Updates(), Bell(),
+                           self.clock]
 
         self.provider = Gtk.CssProvider()
         self.user_provider = Gtk.CssProvider()

@@ -38,10 +38,13 @@ else
     mako -c "$(firox-theme path mako.conf)" >/dev/null 2>&1 &
 fi
 
-# Notification-area (tray) icons
-# (either can be turned off in Settings > Startup Programs)
+# Network and Bluetooth: the taskbar's own icons and pop-ups (firox-network,
+# firox-bluetooth). The pairing helper answers Bluetooth PIN requests. The
+# classic nm-applet and Blueman tray icons are off unless turned on in
+# Settings > Startup Programs (Blueman then pairs devices itself).
 ( sleep 2; firox-startup want network && exec nm-applet --indicator ) >/dev/null 2>&1 &
 ( sleep 2; firox-startup want bluetooth && exec blueman-applet ) >/dev/null 2>&1 &
+( sleep 3; firox-bluetooth daemon ) >/dev/null 2>&1 &
 
 # Password prompts for admin tasks
 /usr/libexec/polkit-mate-authentication-agent-1 >/dev/null 2>&1 &
