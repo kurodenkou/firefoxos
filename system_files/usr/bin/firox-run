@@ -1,0 +1,445 @@
+#!/usr/bin/python3
+"""
+firox-run: the Run dialog (Start > Run..., Super+R).
+
+    firox-run
+
+Type a program, folder, file or web address and press Enter:
+
+  firefox, vlc, btop      programs (by command or by their name in the
+                          Start menu; terminal programs open in a window)
+  ~/Documents, /etc       folders open in the file manager
+  ~/notes.txt             files open in their default program
+  example.com, https://…  web addresses open in your web browser
+  mailto:someone@…        email
+  ls -l | less            anything else runs as a shell command; tick
+                          "Run in a terminal window" to see its output
+
+Old Windows names work too: cmd, notepad, calc, control, taskmgr,
+explorer, msconfig, iexplore, winver and more.
+
+The last 26 commands are remembered (in ~/.local/state/firox/run-history)
+and listed when you click the arrow; the most recent one is filled in.
+As you type, the rest of a matching command, program or file path is filled
+in, selected: keep typing to replace it, or press Enter to accept it.
+Browse... picks a file.
+"""
+
+import os
+import re
+import shlex
+import shutil
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+try:   # newer GLib moved DesktopAppInfo to GioUnix
+    gi.require_version("GioUnix", "2.0")
+    from gi.repository import GioUnix  # noqa: E402
+    DesktopAppInfo = GioUnix.DesktopAppInfo
+except (ValueError, ImportError):
+    DesktopAppInfo = Gio.DesktopAppInfo
+
+STATE = os.path.join(GLib.get_user_state_dir(), "firox")
+HISTORY = os.path.join(STATE, "run-history")
+HISTORY_MAX = 26
+TERMINAL = ["xfce4-terminal", "--disable-server"]
+
+# Names people type out of habit -> what opens (first one that's installed)
+ALIASES = {
+    "cmd": [["xfce4-terminal"], ["foot"]],
+    "command": [["xfce4-terminal"], ["foot"]],
+    "powershell": [["xfce4-terminal"], ["foot"]],
+    "terminal": [["xfce4-terminal"], ["foot"]],
+    "notepad": [["mousepad"]],
+    "wordpad": [["mousepad"]],
+    "write": [["mousepad"]],
+    "calc": [["galculator"]],
+    "control": [["firox-control-panel"]],
+    "settings": [["firox-control-panel"]],
+    "taskmgr": [["firox-taskmgr"]],
+    "explorer": [["pcmanfm-qt"]],
+    "msconfig": [["firox-startup"]],
+    "snippingtool": [["firox-open", "screenshot-region"]],
+    "winver": [["firox-control-panel", "system"]],
+    "iexplore": "browser",
+    "msedge": "browser",
+    "chrome": "browser",
+    "wmplayer": [["vlc"]],
+    "mplayer2": [["vlc"]],
+    "appwiz.cpl": [["firox-open", "software"]],
+    "desk.cpl": [["firox-display"]],
+    "main.cpl": [["firox-control-panel", "mouse"]],
+    "mmsys.cpl": [["pavucontrol"]],
+    "ncpa.cpl": [["nm-connection-editor"]],
+    "powercfg.cpl": [["firox-control-panel", "power"]],
+    "sysdm.cpl": [["firox-control-panel", "system"]],
+    "timedate.cpl": [["firox-control-panel", "datetime"]],
+    "diskmgmt.msc": [["gnome-disks"]],
+    "devmgmt.msc": [["firox-control-panel", "system"]],
+    "rstrui": [["firox-restore"]],
+}
+
+# Programs that only make sense in a terminal window
+TERMINAL_PROGRAMS = {"top", "htop", "btop", "nano", "vi", "vim", "nvim", "less", "more", "man",
+                     "mc", "ranger", "nvtop", "ssh", "python3", "python", "bash", "sh", "zsh",
+                     "fish", "toolbox", "distrobox", "ujust", "fastfetch", "watch", "tail"}
+
+DOMAIN = re.compile(r"^(www\.)?[\w-]+(\.[\w-]+)*\.[a-z]{2,}(:\d+)?(/\S*)?$", re.IGNORECASE)
+SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*:(//)?\S", re.IGNORECASE)
+
+
+# --- history -----------------------------------------------------------------
+
+def load_history():
+    try:
+        with open(HISTORY) as fh:
+            return [line.rstrip("\n") for line in fh if line.strip()][:HISTORY_MAX]
+    except OSError:
+        return []
+
+
+def save_history(cmd):
+    items = [cmd] + [h for h in load_history() if h != cmd]
+    try:
+        os.makedirs(STATE, exist_ok=True)
+        tmp = HISTORY + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write("".join(f"{h}\n" for h in items[:HISTORY_MAX]))
+        os.replace(tmp, HISTORY)
+    except OSError:
+        pass
+
+
+# --- what to do with the text --------------------------------------------------
+
+def apps_by_name():
+    """Start menu programs, by lowercase name, desktop id and command."""
+    found = {}
+    for info in Gio.AppInfo.get_all():
+        if not isinstance(info, DesktopAppInfo) or info.get_nodisplay():
+            continue
+        keys = [info.get_name() or "", (info.get_id() or "").removesuffix(".desktop")]
+        exe = info.get_executable()
+        if exe:
+            keys.append(os.path.basename(exe))
+        for k in keys:
+            k = k.lower()
+            if k and k not in found:
+                found[k] = info
+    return found
+
+
+def first_installed(choices):
+    for argv in choices:
+        if shutil.which(argv[0]):
+            return argv
+    return None
+
+
+def resolve(text):
+    """What TEXT means: ("argv", [...]), ("shell", cmd), ("open", uri),
+    ("app", DesktopAppInfo) or ("missing", word)."""
+    text = text.strip()
+    low = text.lower()
+    if ALIASES.get(low) == "browser":
+        info = Gio.AppInfo.get_default_for_uri_scheme("https")
+        if info is not None:
+            return ("app", info)
+    elif low in ALIASES:
+        argv = first_installed(ALIASES[low])
+        if argv:
+            return ("argv", argv)
+
+    # A path: folders and documents open in their program, programs run
+    path = os.path.expanduser(text)
+    if text.startswith(("/", "~", "./", "../")) or (" " not in text and os.path.exists(
+            os.path.join(os.path.expanduser("~"), path))):
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.expanduser("~"), path)
+        if os.path.isdir(path) or (os.path.exists(path) and not os.access(path, os.X_OK)):
+            return ("open", Gio.File.new_for_path(path).get_uri())
+        if os.path.isfile(path):
+            return ("argv", [path])
+        if text.startswith(("/", "~", "./", "../")) and " " not in text:
+            return ("missing", text)
+
+    # Web addresses and other links (mailto:, smb://, ...)
+    if " " not in text:
+        word = text.split("/")[0]
+        if SCHEME.match(text) and not os.path.exists(text) and not shutil.which(word.split(":")[0]):
+            return ("open", text)
+        if DOMAIN.match(text) and not shutil.which(word):
+            return ("open", "https://" + text)
+
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        words = text.split()
+    if not words:
+        return ("missing", text)
+    first = words[0]
+
+    # A program's Start menu name ("Firefox", "Media Player") or desktop id
+    if len(words) == 1 or not shutil.which(first):
+        info = apps_by_name().get(low)
+        if info is not None:
+            return ("app", info)
+    if shutil.which(os.path.expanduser(first)) or "=" in first or first in ("cd", "export", "for", "if"):
+        return ("shell", text)
+    return ("missing", first)
+
+
+def spawn(argv):
+    GLib.spawn_async(argv, working_directory=os.path.expanduser("~"),
+                     flags=GLib.SpawnFlags.SEARCH_PATH)
+
+
+def in_terminal(cmd):
+    spawn(TERMINAL + ["-T", cmd, "--hold", "-x", "sh", "-c", cmd])
+
+
+def launch(text, terminal=False):
+    """Start TEXT. Returns None, or an error message."""
+    kind, what = resolve(text)
+    try:
+        if kind == "missing":
+            return (f"Firox cannot find '{what}'. Make sure you typed the name correctly, "
+                    "and then try again.")
+        if kind == "open":
+            Gio.AppInfo.launch_default_for_uri(what, None)
+        elif kind == "app":
+            what.launch([], None)
+        elif kind == "argv":
+            if terminal:
+                in_terminal(shlex.join(what))
+            else:
+                spawn(what)
+        else:
+            first = os.path.basename(shlex.split(what)[0]) if what else ""
+            if terminal or first in TERMINAL_PROGRAMS:
+                in_terminal(what)
+            else:
+                spawn(["sh", "-c", what])
+    except GLib.Error as err:
+        return err.message
+    except ValueError as err:
+        return str(err)
+    return None
+
+
+# --- completion ------------------------------------------------------------------
+
+_programs = None
+
+
+def programs():
+    """Command names on PATH, and Start menu names."""
+    global _programs
+    if _programs is None:
+        names = set()
+        for d in os.environ.get("PATH", "/usr/bin").split(":"):
+            try:
+                for e in os.scandir(d):
+                    if not e.name.startswith(".") and e.is_file() and os.access(e.path, os.X_OK):
+                        names.add(e.name)
+            except OSError:
+                continue
+        for info in Gio.AppInfo.get_all():
+            if info.should_show() and info.get_name():
+                names.add(info.get_name())
+        _programs = sorted(names, key=str.lower)
+    return _programs
+
+
+def complete(text, history, limit=40):
+    if not text:
+        return []
+    if text.startswith(("/", "~", "./", "../")) or "/" in text and " " not in text:
+        full = os.path.expanduser(text)
+        base, prefix = os.path.split(full)
+        shown = text[:len(text) - len(prefix)]
+        try:
+            entries = sorted(os.scandir(base or "."), key=lambda e: e.name.lower())
+        except OSError:
+            return []
+        out = []
+        for e in entries:
+            if e.name.startswith(prefix) and (prefix.startswith(".") or not e.name.startswith(".")):
+                out.append(shown + e.name + ("/" if e.is_dir() else ""))
+                if len(out) >= limit:
+                    break
+        return out
+    low = text.lower()
+    out = [h for h in history if h.lower().startswith(low) and h != text]
+    if " " not in text:
+        out += [p for p in programs() if p.lower().startswith(low) and p not in out and p != text]
+    return out[:limit]
+
+
+# --- window ------------------------------------------------------------------
+
+class RunWindow(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Run")
+        self.set_icon_name("system-run")
+        self.set_resizable(False)
+        self.set_keep_above(True)
+        self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.history = load_history()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_border_width(14)
+        self.add(box)
+
+        top = Gtk.Box(spacing=14)
+        img = Gtk.Image.new_from_icon_name("system-run", Gtk.IconSize.DIALOG)
+        img.set_valign(Gtk.Align.START)
+        top.pack_start(img, False, False, 0)
+        top.pack_start(Gtk.Label(
+            label="Type the name of a program, folder, document, or Internet resource, "
+                  "and Firox will open it for you.",
+            xalign=0, wrap=True, max_width_chars=44), True, True, 0)
+        box.pack_start(top, False, False, 0)
+
+        row = Gtk.Box(spacing=8)
+        open_label = Gtk.Label(label="_Open:", use_underline=True)
+        row.pack_start(open_label, False, False, 0)
+        self.combo = Gtk.ComboBoxText.new_with_entry()
+        for h in self.history:
+            self.combo.append_text(h)
+        self.entry = self.combo.get_child()
+        self.entry.set_width_chars(40)
+        open_label.set_mnemonic_widget(self.entry)
+        row.pack_start(self.combo, True, True, 0)
+        box.pack_start(row, False, False, 0)
+
+        self.typed = ""        # what was typed, without the completed part
+        self.completing = False
+        self.error = None      # the "cannot find" message box, while it's open
+        self.entry.connect("changed", self.on_changed)
+
+        self.terminal = Gtk.CheckButton(label="Run in a _terminal window", use_underline=True)
+        self.terminal.set_margin_start(open_label.get_preferred_width()[1] + 8)
+        box.pack_start(self.terminal, False, False, 0)
+
+        buttons = Gtk.ButtonBox(spacing=8, layout_style=Gtk.ButtonBoxStyle.END)
+        self.ok = Gtk.Button(label="OK")
+        self.ok.set_can_default(True)
+        self.ok.connect("clicked", self.on_ok)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda _b: self.close())
+        browse = Gtk.Button(label="_Browse...", use_underline=True)
+        browse.connect("clicked", self.on_browse)
+        for b in (self.ok, cancel, browse):
+            b.set_size_request(84, -1)
+            buttons.add(b)
+        box.pack_start(buttons, False, False, 0)
+
+        self.connect("key-press-event", self.on_key)
+        if self.history:
+            self.entry.set_text(self.history[0])
+        self.update_ok()
+        self.show_all()
+        self.ok.grab_default()
+        self.entry.grab_focus()   # selects the text, so typing replaces it
+
+    def update_ok(self):
+        self.ok.set_sensitive(bool(self.entry.get_text().strip()))
+
+    def on_changed(self, entry):
+        self.update_ok()
+        if self.completing or not entry.has_focus():
+            return
+        text = entry.get_text()
+        grew = text.startswith(self.typed) and len(text) > len(self.typed)
+        self.typed = text
+        if grew:
+            GLib.idle_add(self.autocomplete, text)
+
+    def autocomplete(self, text):
+        """Fill in the rest of the first match, selected, so typing on
+        replaces it and Enter accepts it (like Windows' AutoComplete)."""
+        if self.entry.get_text() != text or self.entry.get_position() != len(text):
+            return False
+        matches = complete(text, self.history, limit=1)
+        if matches and matches[0].lower().startswith(text.lower()) and len(matches[0]) > len(text):
+            self.completing = True
+            self.entry.set_text(text + matches[0][len(text):])
+            self.entry.select_region(len(text), -1)
+            self.completing = False
+        return False
+
+    def on_key(self, _w, ev):
+        if self.error is not None:   # keys meant for the message box
+            if ev.keyval in (Gdk.KEY_Escape, Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
+                self.close_error()
+            return True
+        if ev.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        if ev.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter) and \
+                self.get_focus() in (self.entry, self.terminal):
+            self.on_ok(None)
+            return True
+        return False
+
+    def on_browse(self, _b):
+        dlg = Gtk.FileChooserNative(title="Browse", transient_for=self,
+                                    action=Gtk.FileChooserAction.OPEN, accept_label="Open")
+        dlg.set_current_folder(os.path.expanduser("~"))
+        if dlg.run() == Gtk.ResponseType.ACCEPT:
+            path = dlg.get_filename()
+            home = os.path.expanduser("~")
+            if path.startswith(home + "/"):
+                path = "~/" + path[len(home) + 1:]
+            self.entry.set_text(shlex.quote(path) if " " in path else path)
+            self.entry.grab_focus()
+        dlg.destroy()
+
+    def on_ok(self, _b):
+        text = self.entry.get_text().strip()
+        if not text or self.error is not None:
+            return
+        err = launch(text, self.terminal.get_active())
+        if err:
+            self.show_error(text, err)
+            return
+        save_history(text)
+        self.close()
+
+    def show_error(self, title, message):
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.ERROR,
+                                buttons=Gtk.ButtonsType.OK, text=message)
+        dlg.set_title(title)
+        dlg.connect("response", lambda *_: self.close_error())
+        self.error = dlg
+        dlg.present()
+
+    def close_error(self):
+        if self.error is not None:
+            self.error.destroy()
+            self.error = None
+            self.entry.grab_focus()   # with the text selected, to retype it
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Run")
+
+    def do_activate(self):
+        win = self.get_active_window() or RunWindow(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == "--resolve":   # for testing
+        kind, what = resolve(" ".join(sys.argv[2:]))
+        print(kind, what.get_id() if kind == "app" else what)
+        sys.exit(0)
+    sys.exit(App().run(sys.argv[:1]))

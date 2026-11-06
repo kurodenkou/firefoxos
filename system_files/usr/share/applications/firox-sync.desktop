@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sync
+Comment=Keep folders the same on your Firox computers
+Exec=firox-sync
+Icon=emblem-synchronizing
+Categories=Network;Utility;
+Keywords=sync;syncthing;share;folders;network;
+StartupNotify=false

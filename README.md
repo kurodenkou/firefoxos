@@ -64,7 +64,11 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Desktop Gadgets | `firox-gadgets`: a Vista-style Sidebar on the right of the desktop (layer-shell, behind windows) with Clock, Calendar, CPU Meter, Weather (Open-Meteo, no account; set your city in its options), Slide Show (your Pictures folder) and Notes. **+ Gadgets** opens the gallery; hover a gadget for ×, right-click for Options, Move up/down, Close, Hide. On at login; turn it off in Settings → Taskbar. Settings: `~/.config/firox/gadgets.conf` |
 | Task Manager | `firox-taskmgr` (Ctrl+Alt+Del, Ctrl+Shift+Esc): **Applications** (open windows: Switch To, End Task), **Processes** (CPU and memory per process, sortable, all users optional, End Process) and **Performance** (green-on-black CPU and memory history graphs, totals, physical memory, swap). btop is in the Start menu as Resource Monitor |
 | System Restore | `firox-restore` (Settings → System Restore): lists the installed versions of Firox Linux (`rpm-ostree status`) and restores the previous one (`rpm-ostree rollback`, with Undo), keeps a version past later updates (`ostree admin pin`), shows what changed between versions, cancels a waiting update, and pauses automatic updates so a restored version stays. Files, settings and Flatpaks aren't affected |
-| Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, xfce4-terminal "Command Prompt" (tabs, Edit > Preferences; Super+Enter), btop "Task Manager", VLC "Media Player" (music, videos, DVDs; full codecs from the base image) |
+| Backup and Restore | `firox-backup` (Settings → Backup and Restore): backs up your home folder every hour to a USB drive or a network folder (smb://…), and as soon as the backup drive is plugged in. Each backup is a dated folder with a complete copy, unchanged files hard-linked to the previous one (rsync `--link-dest`, like the original Time Machine); hourly kept for a day, daily for a month, then weekly, oldest removed when the drive is full. Drives without hard links (FAT/exFAT, most shares) get a Latest copy plus Older versions. Restore window: pick a backup by date, pick files, Restore (or Restore everything). Backups are plain folders you can open anywhere |
+| Sync | `firox-sync` (Settings → Sync): Firox computers on the same network find each other with Avahi (Bonjour, `_firox-sync._tcp`), pair with a 6-digit PIN shown on the other computer (HMAC proof over both IDs; the PIN never crosses the network), and keep the folders you tick (Documents, Pictures, Music, Videos, Desktop) the same on all of them. The engine is a private Syncthing instance, local network only (no global discovery or relays); replaced or deleted files are kept 30 days in `.stversions` |
+| Run | `firox-run` (Start → Run…, Super+R): an XP-style Run box. Type a program (command or Start menu name), a folder, a file, a web address or any shell command; the rest of a matching command, program or path fills in as you type. Remembers the last 26 (the arrow lists them, the last one is filled in), Browse… picks a file, "Run in a terminal window" shows a command's output, and terminal programs (btop, nano, ssh…) open in one automatically. Old Windows names work: `cmd`, `notepad`, `calc`, `control`, `taskmgr`, `explorer`, `msconfig`, `iexplore`, `winver`, `ncpa.cpl`… |
+| Startup Programs | `firox-startup` (Settings → Startup Programs, or `msconfig` in Run): tick what starts at login. Add any Start menu program or your own command; untick to pause one without removing it. Entries are standard `~/.config/autostart/*.desktop` files, so apps' own "start at login" options appear here too, and they start a few seconds after login once the notification area is up (`~/.local/state/firox/startup.log` says what started). Firox's network and Bluetooth icons and Desktop Gadgets can be turned off here as well |
+| Extras | mako "balloon" notifications, swaylock, xfce4-terminal "Command Prompt" (tabs, Edit > Preferences; Super+Enter), btop "Task Manager", VLC "Media Player" (music, videos, DVDs; full codecs from the base image) |
 
 ![Taskbar: a group of three terminals opened, the same windows ungrouped, and the Modern look](docs/screenshots/taskbar.png)
 
@@ -75,6 +79,12 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 ![Task Manager: Processes and Performance](docs/screenshots/task-manager.png)
 
 ![System Restore](docs/screenshots/system-restore.png)
+
+![Run, Startup Programs and Add a Startup Program](docs/screenshots/run-startup.png)
+
+![Backup and Restore](docs/screenshots/backup.png)
+
+![Sync: the Sync window and the PIN on the other computer](docs/screenshots/sync.png)
 
 ![Boot splash](docs/screenshots/boot-splash.png)
 
@@ -217,7 +227,7 @@ It shows up in **Settings → Screen Saver** straight away. It runs full screen 
 
 ### Everything else
 
-Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, Run dialog, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Settings → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
+Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, clipboard picker, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Settings → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 

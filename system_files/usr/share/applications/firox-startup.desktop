@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Startup Programs
+Comment=Choose which programs start when you log in
+Exec=firox-startup
+Icon=system-run
+Categories=System;Settings;
+Keywords=startup;autostart;login;msconfig;boot;
+StartupNotify=false
