@@ -1,0 +1,699 @@
+#!/usr/bin/python3
+"""
+firox-sync: keep folders in sync between the Firox computers on your network.
+
+    firox-sync                open Sync (pair computers, pick folders)
+    firox-sync daemon         at login, when Sync is on: run the sync engine,
+                              announce this computer and answer pairing
+    firox-sync on|off         turn Sync on or off
+    firox-sync status         print this computer's ID, peers and folders
+
+Firox computers find each other with Avahi (Bonjour): each one with Sync on
+announces itself as _firox-sync._tcp. Pairing two computers takes a 6-digit
+PIN shown on the other one; both prove they know it (an HMAC over their IDs,
+so the PIN itself never crosses the network) before they trust each other.
+
+The syncing is done by Syncthing, run privately by Firox (its own settings
+in ~/.local/state/firox/sync, separate from any Syncthing you set up
+yourself), only on the local network: no internet discovery or relays. A
+folder syncs between the paired computers that have it ticked. Files another
+computer deleted or replaced are kept for 30 days in the folder's
+.stversions.
+
+Settings: ~/.config/firox/sync.json
+"""
+
+import hashlib
+import hmac
+import http.server
+import json
+import os
+import random
+import secrets
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "firox")
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
+CONF = os.path.join(CONFIG, "sync.json")
+ST_HOME = os.path.join(STATE_DIR, "sync")
+GUI = "127.0.0.1:8385"                  # Syncthing's API, only on this computer
+PAIR_PORT = int(os.environ.get("FIROX_SYNC_PORT", "22100"))
+SERVICE = "_firox-sync._tcp"
+FOLDERS = [
+    # key, label, XDG directory
+    ("documents", "Documents", "DOCUMENTS"),
+    ("pictures", "Pictures", "PICTURES"),
+    ("music", "Music", "MUSIC"),
+    ("videos", "Videos", "VIDEOS"),
+    ("desktop", "Desktop", "DESKTOP"),
+]
+
+
+# ----------------------------------------------------------------- config --
+
+def load_conf():
+    conf = {"enabled": False, "folders": ["documents"], "peers": {}, "apikey": ""}
+    try:
+        with open(CONF) as fh:
+            conf.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    if not conf.get("apikey"):
+        conf["apikey"] = secrets.token_hex(16)
+        save_conf(conf)
+    return conf
+
+
+def save_conf(conf):
+    os.makedirs(CONFIG, exist_ok=True)
+    tmp = CONF + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)     # holds the API key
+    with os.fdopen(fd, "w") as fh:
+        json.dump(conf, fh, indent=1)
+    os.replace(tmp, CONF)
+
+
+def computer_name():
+    try:
+        pretty = subprocess.run(["hostnamectl", "--pretty"], capture_output=True, text=True,
+                                timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pretty = ""
+    user = os.environ.get("USER", "")
+    host = pretty or socket.gethostname().split(".")[0]
+    return f"{user} on {host}" if user else host
+
+
+def folder_path(xdg):
+    try:
+        from gi.repository import GLib
+        p = GLib.get_user_special_dir(getattr(GLib.UserDirectory, "DIRECTORY_" + xdg))
+    except Exception:  # noqa: BLE001
+        p = None
+    return p or os.path.join(os.path.expanduser("~"), xdg.capitalize())
+
+
+# -------------------------------------------------------------- syncthing --
+
+class Syncthing:
+    def __init__(self, apikey):
+        self.apikey = apikey
+
+    def call(self, method, path, body=None, timeout=10):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(f"http://{GUI}{path}", data=data, method=method,
+                                     headers={"X-API-Key": self.apikey, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        return json.loads(raw) if raw.strip() else None
+
+    def up(self):
+        try:
+            self.call("GET", "/rest/system/ping", timeout=2)
+            return True
+        except (OSError, urllib.error.URLError, ValueError):
+            return False
+
+    def my_id(self):
+        return self.call("GET", "/rest/system/status")["myID"]
+
+    def connections(self):
+        try:
+            return self.call("GET", "/rest/system/connections").get("connections", {})
+        except (OSError, urllib.error.URLError, ValueError):
+            return {}
+
+    def completion(self, device):
+        try:
+            return self.call("GET", f"/rest/db/completion?device={device}").get("completion")
+        except (OSError, urllib.error.URLError, ValueError):
+            return None
+
+    def setup(self):
+        """Local network only, no telemetry."""
+        self.call("PATCH", "/rest/config/options", {
+            "globalAnnounceEnabled": False, "relaysEnabled": False, "natEnabled": False,
+            "localAnnounceEnabled": True, "urAccepted": -1, "crashReportingEnabled": False,
+            "autoUpgradeIntervalH": 0, "startBrowser": False})
+
+    def apply(self, conf):
+        """Make Syncthing's devices and folders match sync.json."""
+        me = self.my_id()
+        cfg = self.call("GET", "/rest/config")
+        peers = conf.get("peers", {})
+        for dev in cfg.get("devices", []):
+            if dev["deviceID"] != me and dev["deviceID"] not in peers:
+                self.call("DELETE", f"/rest/config/devices/{dev['deviceID']}")
+        for did, p in peers.items():
+            addrs = ["dynamic"] + ([f"tcp://{p['address']}:22000"] if p.get("address") else [])
+            self.call("PUT", f"/rest/config/devices/{did}", {
+                "deviceID": did, "name": p.get("name", did[:7]), "addresses": addrs,
+                "autoAcceptFolders": False, "introducer": False})
+        wanted = set(conf.get("folders", []))
+        for f in cfg.get("folders", []):
+            if f["id"].startswith("firox-") and f["id"][6:] not in wanted:
+                self.call("DELETE", f"/rest/config/folders/{f['id']}")   # stops syncing; files stay
+        for key, label, xdg in FOLDERS:
+            if key not in wanted:
+                continue
+            path = folder_path(xdg)
+            os.makedirs(path, exist_ok=True)
+            self.call("PUT", f"/rest/config/folders/firox-{key}", {
+                "id": f"firox-{key}", "label": label, "path": path, "type": "sendreceive",
+                "devices": [{"deviceID": me}] + [{"deviceID": d} for d in peers],
+                "fsWatcherEnabled": True, "rescanIntervalS": 3600,
+                "versioning": {"type": "trashcan", "params": {"cleanoutDays": "30"}}})
+
+
+def start_syncthing(apikey):
+    os.makedirs(ST_HOME, exist_ok=True)
+    env = dict(os.environ, STHOMEDIR=ST_HOME, STGUIADDRESS=GUI, STGUIAPIKEY=apikey,
+               STNODEFAULTFOLDER="1", STNOUPGRADE="1")
+    log = open(os.path.join(ST_HOME, "syncthing.log"), "ab")
+    return subprocess.Popen(["syncthing", "serve", "--no-browser"], env=env,
+                            stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+
+
+# ---------------------------------------------------------------- pairing --
+
+def proof(pin, a, b):
+    return hmac.new(pin.encode(), f"firox-sync|{a}|{b}".encode(), hashlib.sha256).hexdigest()
+
+
+def post(address, path, body, timeout=10):
+    req = urllib.request.Request(f"http://{address}:{PAIR_PORT}{path}", data=json.dumps(body).encode(),
+                                 method="POST", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def discover(timeout=6):
+    """Firox computers on the network with Sync on: [{name, id, address}]."""
+    try:
+        out = subprocess.run(["avahi-browse", "-p", "-r", "-t", SERVICE], capture_output=True, text=True,
+                             timeout=timeout + 4).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = {}
+    for line in out.splitlines():
+        parts = line.split(";")
+        if not parts or parts[0] != "=" or len(parts) < 10 or parts[2] != "IPv4":
+            continue
+        txt = dict(t.strip('"').split("=", 1) for t in parts[9].split('" "') if "=" in t)
+        did = txt.get("id")
+        if did:
+            found[did] = {"name": parts[3].replace("\\032", " "), "id": did, "address": parts[7]}
+    return list(found.values())
+
+
+class Pairing:
+    """The daemon's side: a computer asks to pair, we show a PIN, it proves
+    it knows it."""
+
+    def __init__(self, daemon):
+        self.daemon = daemon
+        self.pending = {}            # their id -> {pin, name, address, expires, tries}
+
+    def request(self, body, address):
+        their = body.get("id", "")
+        if not their or len(their) > 80:
+            return 400, {"error": "bad request"}
+        pin = f"{random.SystemRandom().randrange(1000000):06d}"
+        self.pending[their] = {"pin": pin, "name": str(body.get("name", "A computer"))[:60],
+                               "address": address, "expires": time.time() + 180, "tries": 0}
+        self.daemon.show_pin(self.pending[their]["name"], pin)
+        return 200, {"name": computer_name(), "id": self.daemon.my_id}
+
+    def confirm(self, body, address):
+        their = body.get("id", "")
+        p = self.pending.get(their)
+        if p is None or time.time() > p["expires"]:
+            return 403, {"error": "No pairing in progress; start again."}
+        p["tries"] += 1
+        good = proof(p["pin"], their, self.daemon.my_id)
+        if not hmac.compare_digest(good, str(body.get("proof", ""))):
+            if p["tries"] >= 3:
+                self.pending.pop(their, None)
+                self.daemon.hide_pin()
+            return 403, {"error": "Wrong PIN"}
+        self.pending.pop(their, None)
+        self.daemon.add_peer(their, p["name"], address)
+        self.daemon.hide_pin(paired=p["name"])
+        return 200, {"name": computer_name(), "id": self.daemon.my_id,
+                     "proof": proof(p["pin"], self.daemon.my_id, their)}
+
+
+def make_handler(pairing):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def reply(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path == "/info":
+                self.reply(200, {"name": computer_name(), "id": pairing.daemon.my_id, "v": 1})
+            else:
+                self.reply(404, {})
+
+        def do_POST(self):
+            try:
+                n = min(int(self.headers.get("Content-Length", "0")), 4096)
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except (ValueError, OSError):
+                return self.reply(400, {"error": "bad request"})
+            address = self.client_address[0]
+            if self.path == "/pair/request":
+                code, out = pairing.request(body, address)
+            elif self.path == "/pair/confirm":
+                code, out = pairing.confirm(body, address)
+            elif self.path == "/reload" and address == "127.0.0.1":
+                pairing.daemon.reload()
+                code, out = 200, {}
+            else:
+                code, out = 404, {}
+            self.reply(code, out)
+    return Handler
+
+
+class Daemon:
+    def __init__(self):
+        from gi.repository import GLib
+        self.GLib = GLib
+        self.conf = load_conf()
+        self.st = Syncthing(self.conf["apikey"])
+        self.proc = start_syncthing(self.conf["apikey"])
+        for _ in range(60):
+            if self.st.up():
+                break
+            time.sleep(0.5)
+        self.my_id = self.st.my_id()
+        self.st.setup()
+        self.st.apply(self.conf)
+        self.pin_dialog = None
+        self.pairing = Pairing(self)
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", PAIR_PORT), make_handler(self.pairing))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.publisher = None
+        self.publish()
+        GLib.timeout_add_seconds(30, self.watchdog)
+
+    def publish(self):
+        """Announce this computer on the network (Avahi)."""
+        self.publisher = subprocess.Popen(
+            ["avahi-publish-service", computer_name(), SERVICE, str(PAIR_PORT), f"id={self.my_id}", "v=1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def watchdog(self):
+        if self.proc.poll() is not None:
+            self.proc = start_syncthing(self.conf["apikey"])
+        if self.publisher is None or self.publisher.poll() is not None:
+            self.publish()
+        return True
+
+    def reload(self):
+        self.conf = load_conf()
+        self.GLib.idle_add(lambda: self.st.apply(self.conf) and False)
+
+    def add_peer(self, did, name, address):
+        self.conf = load_conf()
+        self.conf.setdefault("peers", {})[did] = {"name": name, "address": address, "paired": time.time()}
+        save_conf(self.conf)
+        self.st.apply(self.conf)
+
+    # PIN window (shown on this computer while another one pairs with it)
+    def show_pin(self, name, pin):
+        self.GLib.idle_add(self._show_pin, name, pin)
+
+    def _show_pin(self, name, pin):
+        from gi.repository import Gtk
+        self._hide_pin()
+        dlg = Gtk.MessageDialog(message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CANCEL,
+                                text=f"{name} wants to sync with this computer")
+        dlg.set_title("Sync")
+        dlg.format_secondary_markup(
+            "To pair them, type this PIN on that computer:\n\n"
+            f"<span size='xx-large' font_family='monospace' weight='bold'>{pin[:3]} {pin[3:]}</span>\n\n"
+            "If you didn't start this, click Cancel.")
+        dlg.connect("response", lambda d, _r: (self.pairing.pending.clear(), d.destroy()))
+        dlg.set_keep_above(True)
+        dlg.show_all()
+        self.pin_dialog = dlg
+        return False
+
+    def hide_pin(self, paired=None):
+        self.GLib.idle_add(self._hide_pin, paired)
+
+    def _hide_pin(self, paired=None):
+        if self.pin_dialog is not None:
+            self.pin_dialog.destroy()
+            self.pin_dialog = None
+        if paired:
+            subprocess.Popen(["notify-send", "-a", "Sync", "-i", "emblem-synchronizing",
+                              "Paired", f"This computer now syncs with {paired}."])
+        return False
+
+    def stop(self):
+        for p in (self.publisher, self.proc):
+            if p is not None and p.poll() is None:
+                p.terminate()
+
+
+def run_daemon():
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import GLib, Gtk
+    import signal
+    if not load_conf().get("enabled"):
+        return 0
+    others = [p for p in subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", "firox-sync daemon"],
+                                        capture_output=True, text=True).stdout.split()
+              if p != str(os.getpid())]
+    if others:
+        return 0                          # already running
+    d = Daemon()
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda: (d.stop(), Gtk.main_quit()) and False)
+    Gtk.main()
+    d.stop()
+    return 0
+
+
+def poke_daemon():
+    try:
+        post("127.0.0.1", "/reload", {}, timeout=3)
+    except (OSError, urllib.error.URLError, ValueError):
+        pass
+
+
+def set_enabled(on):
+    conf = load_conf()
+    conf["enabled"] = bool(on)
+    save_conf(conf)
+    if on:
+        subprocess.Popen([sys.argv[0], "daemon"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(["pkill", "-u", str(os.getuid()), "-f", "firox-sync daemon"])
+
+
+# --------------------------------------------------------------------- UI --
+
+def ui():
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gio, GLib, Gtk
+
+    class Main(Gtk.ApplicationWindow):
+        def __init__(self, app):
+            super().__init__(application=app, title="Sync")
+            self.set_default_size(560, 560)
+            self.set_icon_name("emblem-synchronizing")
+            self.conf = load_conf()
+            self.st = Syncthing(self.conf["apikey"])
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            box.set_border_width(16)
+            self.add(box)
+            head = Gtk.Box(spacing=12)
+            head.pack_start(Gtk.Image.new_from_icon_name("emblem-synchronizing", Gtk.IconSize.DIALOG),
+                            False, False, 0)
+            intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+            intro.set_markup("<span size='large'><b>Keep folders in sync between your computers</b></span>\n"
+                             "Firox computers on the same network find each other. Pair them once with a "
+                             "PIN, and the folders you tick stay the same on all of them.")
+            head.pack_start(intro, True, True, 0)
+            box.pack_start(head, False, False, 0)
+
+            on_row = Gtk.Box(spacing=10)
+            self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+            self.switch.set_active(self.conf.get("enabled", False))
+            self.switch.connect("notify::active", self.on_switch)
+            on_row.pack_start(self.switch, False, False, 0)
+            self.on_label = Gtk.Label(xalign=0, wrap=True)
+            on_row.pack_start(self.on_label, True, True, 0)
+            box.pack_start(on_row, False, False, 0)
+
+            self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            box.pack_start(self.body, True, True, 0)
+
+            fr = Gtk.Frame(label="Folders to keep in sync")
+            fb = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=3)
+            fb.set_border_width(8)
+            self.checks = {}
+            for key, label, xdg in FOLDERS:
+                cb = Gtk.CheckButton(label=label)
+                cb.set_tooltip_text(folder_path(xdg))
+                cb.set_active(key in self.conf.get("folders", []))
+                cb.connect("toggled", self.on_folders)
+                fb.add(cb)
+                self.checks[key] = cb
+            fr.add(fb)
+            self.body.pack_start(fr, False, False, 0)
+
+            fr2 = Gtk.Frame(label="Computers")
+            v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            v.set_border_width(8)
+            self.peers = Gtk.ListBox()
+            self.peers.set_selection_mode(Gtk.SelectionMode.NONE)
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.set_shadow_type(Gtk.ShadowType.IN)
+            sw.set_min_content_height(160)
+            sw.add(self.peers)
+            v.pack_start(sw, True, True, 0)
+            row = Gtk.Box(spacing=6)
+            self.searching = Gtk.Spinner()
+            row.pack_start(self.searching, False, False, 0)
+            self.search_label = Gtk.Label(xalign=0)
+            row.pack_start(self.search_label, True, True, 0)
+            look = Gtk.Button.new_with_mnemonic("_Look again")
+            look.connect("clicked", lambda _b: self.search())
+            row.pack_end(look, False, False, 0)
+            v.pack_start(row, False, False, 0)
+            fr2.add(v)
+            self.body.pack_start(fr2, True, True, 0)
+
+            note = Gtk.Label(xalign=0, wrap=True, max_width_chars=64)
+            note.get_style_context().add_class("dim-label")
+            note.set_text("Syncing only happens on your local network, directly between your computers. "
+                          "Files another computer deleted or replaced are kept for 30 days in a hidden "
+                          ".stversions folder.")
+            self.body.pack_start(note, False, False, 0)
+            self.nearby = []
+            self.sync_enabled_state()
+            if self.conf.get("enabled"):
+                self.search()
+            GLib.timeout_add_seconds(3, self.refresh_peers)
+
+        def sync_enabled_state(self):
+            on = self.switch.get_active()
+            self.on_label.set_markup(f"<b>Sync is {'on' if on else 'off'}.</b> This computer is "
+                                     f"\"{GLib.markup_escape_text(computer_name())}\".")
+            self.body.set_sensitive(on)
+
+        def on_switch(self, sw, _p):
+            set_enabled(sw.get_active())
+            self.conf = load_conf()
+            self.sync_enabled_state()
+            if sw.get_active():
+                GLib.timeout_add_seconds(3, lambda: self.search() and False)
+
+        def on_folders(self, _cb):
+            self.conf = load_conf()
+            self.conf["folders"] = [k for k, cb in self.checks.items() if cb.get_active()]
+            save_conf(self.conf)
+            poke_daemon()
+
+        # computers
+        def search(self):
+            self.searching.start()
+            self.search_label.set_text("Looking for Firox computers on the network…")
+
+            def work():
+                found = discover()
+                GLib.idle_add(self.found, found)
+            threading.Thread(target=work, daemon=True).start()
+            return False
+
+        def found(self, found):
+            self.searching.stop()
+            self.conf = load_conf()
+            my = None
+            try:
+                my = self.st.my_id() if self.st.up() else None
+            except (OSError, urllib.error.URLError, ValueError, KeyError):
+                pass
+            self.nearby = [f for f in found if f["id"] != my]
+            new = [f for f in self.nearby if f["id"] not in self.conf.get("peers", {})]
+            self.search_label.set_text(
+                f"Found {len(new)} other Firox computer{'s' if len(new) != 1 else ''} to pair with." if new else
+                "No other Firox computers with Sync turned on were found." if not self.nearby else
+                "All the Firox computers nearby are paired.")
+            self.refresh_peers()
+            return False
+
+        def refresh_peers(self):
+            self.conf = load_conf()
+            for child in self.peers.get_children():
+                child.destroy()
+            conns = self.st.connections() if self.switch.get_active() else {}
+            peers = self.conf.get("peers", {})
+            for did, p in peers.items():
+                c = conns.get(did, {})
+                if c.get("connected"):
+                    pct = self.st.completion(did)
+                    status = "Up to date" if pct is None or pct >= 100 else f"Syncing… {pct:.0f}%"
+                else:
+                    status = "Not connected (off, or on another network)"
+                self.peers.add(self.peer_row(p.get("name", did[:7]), status, "computer", "Remove",
+                                             lambda _b, d=did: self.remove_peer(d)))
+            for f in self.nearby:
+                if f["id"] not in peers:
+                    self.peers.add(self.peer_row(f["name"], f"Nearby, at {f['address']}", "network-workgroup",
+                                                 "Pair…", lambda _b, f=f: self.pair(f)))
+            if not peers and not self.nearby:
+                self.peers.add(Gtk.Label(label="No computers yet. Turn Sync on on your other Firox "
+                                               "computers too.", margin=16, wrap=True))
+            self.peers.show_all()
+            return True
+
+        def peer_row(self, name, status, icon, action, cb):
+            row = Gtk.ListBoxRow()
+            h = Gtk.Box(spacing=10)
+            h.set_border_width(6)
+            h.pack_start(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DND), False, False, 0)
+            lab = Gtk.Label(xalign=0)
+            lab.set_markup(f"<b>{GLib.markup_escape_text(name)}</b>\n<small>{GLib.markup_escape_text(status)}</small>")
+            h.pack_start(lab, True, True, 0)
+            b = Gtk.Button(label=action)
+            b.set_valign(Gtk.Align.CENTER)
+            b.connect("clicked", cb)
+            h.pack_end(b, False, False, 0)
+            row.add(h)
+            return row
+
+        def remove_peer(self, did):
+            self.conf = load_conf()
+            name = self.conf.get("peers", {}).get(did, {}).get("name", "this computer")
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                    buttons=Gtk.ButtonsType.NONE, text=f"Stop syncing with {name}?")
+            dlg.format_secondary_text("Your files stay as they are on both computers.")
+            dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            dlg.add_button("Stop syncing", Gtk.ResponseType.OK)
+            ok = dlg.run() == Gtk.ResponseType.OK
+            dlg.destroy()
+            if ok:
+                self.conf["peers"].pop(did, None)
+                save_conf(self.conf)
+                poke_daemon()
+                self.refresh_peers()
+
+        def pair(self, f):
+            if not self.st.up():
+                self.error("Sync is still starting. Try again in a moment.")
+                return
+            me = self.st.my_id()
+            try:
+                post(f["address"], "/pair/request", {"name": computer_name(), "id": me})
+            except (OSError, urllib.error.URLError, ValueError) as e:
+                self.error(f"Couldn't reach {f['name']}: {e}")
+                return
+            dlg = Gtk.Dialog(title="Pair", transient_for=self, modal=True)
+            dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            dlg.add_button("Pair", Gtk.ResponseType.OK)
+            dlg.set_default_response(Gtk.ResponseType.OK)
+            area = dlg.get_content_area()
+            area.set_border_width(14)
+            area.set_spacing(8)
+            area.pack_start(Gtk.Label(label=f"Type the PIN shown on {f['name']}:", xalign=0), False, False, 0)
+            entry = Gtk.Entry(max_length=7, activates_default=True, width_chars=10)
+            entry.get_style_context().add_class("monospace")
+            area.pack_start(entry, False, False, 0)
+            status = Gtk.Label(xalign=0)
+            area.pack_start(status, False, False, 0)
+            dlg.show_all()
+            while dlg.run() == Gtk.ResponseType.OK:
+                pin = "".join(ch for ch in entry.get_text() if ch.isdigit())
+                if len(pin) != 6:
+                    status.set_text("The PIN has 6 digits.")
+                    continue
+                try:
+                    out = post(f["address"], "/pair/confirm", {"id": me, "proof": proof(pin, me, f["id"])})
+                except urllib.error.HTTPError as e:
+                    try:
+                        msg = json.loads(e.read() or b"{}").get("error", str(e))
+                    except ValueError:
+                        msg = str(e)
+                    status.set_text(msg)
+                    if "start again" in msg:
+                        break
+                    continue
+                except (OSError, urllib.error.URLError, ValueError) as e:
+                    status.set_text(f"Couldn't reach {f['name']}: {e}")
+                    continue
+                if out.get("id") != f["id"] or not hmac.compare_digest(
+                        out.get("proof", ""), proof(pin, f["id"], me)):
+                    status.set_text("That computer didn't prove it knows the PIN. Not paired.")
+                    continue
+                self.conf = load_conf()
+                self.conf.setdefault("peers", {})[f["id"]] = {"name": out.get("name", f["name"]),
+                                                              "address": f["address"], "paired": time.time()}
+                save_conf(self.conf)
+                poke_daemon()
+                break
+            dlg.destroy()
+            self.refresh_peers()
+
+        def error(self, text):
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.ERROR,
+                                    buttons=Gtk.ButtonsType.OK, text=text)
+            dlg.run()
+            dlg.destroy()
+
+    class App(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id="org.firox.Sync", flags=Gio.ApplicationFlags.FLAGS_NONE)
+
+        def do_activate(self):
+            win = self.get_active_window() or Main(self)
+            win.show_all()
+            win.present()
+
+    return App().run([sys.argv[0]])
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "daemon":
+        return run_daemon()
+    if cmd in ("on", "off"):
+        set_enabled(cmd == "on")
+        return 0
+    if cmd == "status":
+        conf = load_conf()
+        st = Syncthing(conf["apikey"])
+        print(f"sync: {'on' if conf.get('enabled') else 'off'}; engine {'running' if st.up() else 'not running'}")
+        if st.up():
+            print(f"this computer: {computer_name()} ({st.my_id()})")
+        for did, p in conf.get("peers", {}).items():
+            print(f"paired: {p.get('name')} {did}")
+        print("folders: " + ", ".join(conf.get("folders", [])))
+        return 0
+    if cmd == "":
+        return ui()
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

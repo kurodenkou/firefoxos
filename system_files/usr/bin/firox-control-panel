@@ -61,6 +61,8 @@ APPLETS = [
     ("system-software-install", "Bazaar", "Browse and install apps (Flatpak)", ["firox-open", "software"]),
     ("system-software-update", "System Update", "Update Firox Linux, Flatpaks and toolboxes", ["firox-open", "update"]),
     ("document-revert", "System Restore", "Go back to the version you used before an update", ["firox-restore"]),
+    ("drive-harddisk", "Backup and Restore", "Back up your files to a USB drive or network folder", ["firox-backup"]),
+    ("emblem-synchronizing", "Sync", "Keep folders the same on your Firox computers", ["firox-sync"]),
     ("preferences-system-time", "Date and Time", "Time zone and clock synchronisation", ["@datetime"]),
     ("system-users", "User Accounts", "Change your picture or password", ["@accounts"]),
     ("utilities-system-monitor", "Task Manager", "Running programs and performance", ["firox-open", "task-manager"]),

@@ -1,0 +1,849 @@
+#!/usr/bin/python3
+"""
+firox-backup: Backup and Restore. Back up your home folder to a USB drive or
+a network folder, every hour, and get files back from any backup.
+
+    firox-backup              open Backup and Restore
+    firox-backup restore      open the Restore window
+    firox-backup run          back up now (if a destination is set)
+    firox-backup watch        at login: back up every hour while the
+                              destination is there, and when it's plugged in
+    firox-backup status       print the state
+
+How it's stored: in "Firox Backups/<computer>-<user>" on the destination.
+  * Drives that support hard links (ext4, btrfs, xfs, NTFS...): one folder per
+    backup, named by date and time, each a complete copy of your home folder.
+    Files that didn't change are hard links to the previous backup, so each
+    backup only takes the space of what changed (rsync --link-dest, like the
+    original Time Machine). Hourly backups are kept for a day, daily ones for
+    a month, then weekly ones; the oldest go when the drive gets full.
+  * Drives that can't (FAT/exFAT sticks, most network shares): a "Latest"
+    copy, plus "Older versions/<date>" holding files as they were before they
+    were changed or deleted (rsync --backup-dir).
+Backups are plain folders: you can also browse and copy from them with the
+file manager, on any computer.
+
+Settings: ~/.config/firox/backup.conf. State: ~/.local/state/firox/backup.json.
+"""
+
+import fcntl
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "firox")
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
+CONF = os.path.join(CONFIG, "backup.conf")
+STATE = os.path.join(STATE_DIR, "backup.json")
+LOCK = os.path.join(STATE_DIR, "backup.lock")
+HOME = os.path.expanduser("~")
+TOP = "Firox Backups"
+STAMP = "%Y-%m-%d-%H%M%S"
+SNAP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{6}$")
+EVERY = 3600                       # seconds between backups
+DEFAULT_EXCLUDES = [
+    ".cache", ".local/share/Trash", ".var/app/*/cache", ".local/share/containers",
+    ".local/share/waydroid", ".local/share/flatpak", "Downloads/*.part", ".thumbnails",
+    "*.tmp", ".mozilla/firefox/*/cache2", ".local/state/firox/backup.*",
+]
+
+
+# ------------------------------------------------------------------ state --
+
+def load_conf():
+    conf = {"ENABLED": "1", "DEST": "", "DEST_URI": "", "EXCLUDES": ""}
+    try:
+        with open(CONF) as fh:
+            for line in fh:
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.rstrip("\n").split("=", 1)
+                    conf[k.strip()] = v
+    except OSError:
+        pass
+    return conf
+
+
+def save_conf(conf):
+    os.makedirs(CONFIG, exist_ok=True)
+    tmp = CONF + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("# Backup and Restore (firox-backup)\n")
+        for k, v in conf.items():
+            fh.write(f"{k}={v}\n")
+    os.replace(tmp, CONF)
+
+
+def load_state():
+    try:
+        with open(STATE) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(**changes):
+    state = load_state()
+    state.update(changes)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh)
+    os.replace(tmp, STATE)
+    return state
+
+
+def excludes(conf):
+    extra = [e for e in conf.get("EXCLUDES", "").split(":") if e]
+    return DEFAULT_EXCLUDES + extra
+
+
+def machine():
+    return f"{socket.gethostname().split('.')[0]}-{os.environ.get('USER') or os.getlogin()}"
+
+
+def target_root(dest):
+    return os.path.join(dest, TOP, machine())
+
+
+def dest_available(conf):
+    dest = conf.get("DEST")
+    if not dest:
+        return False
+    if not os.path.isdir(dest) and conf.get("DEST_URI"):
+        # a network folder: try to mount it again (gvfs remembers passwords)
+        subprocess.run(["gio", "mount", conf["DEST_URI"]], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    return os.path.isdir(dest) and os.access(dest, os.W_OK)
+
+
+def can_hardlink(root):
+    a, b = os.path.join(root, ".linktest-a"), os.path.join(root, ".linktest-b")
+    try:
+        with open(a, "w") as fh:
+            fh.write("x")
+        os.link(a, b)
+        return True
+    except OSError:
+        return False
+    finally:
+        for p in (a, b):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def snapshots(root):
+    """Completed snapshot folders, oldest first."""
+    try:
+        return sorted(n for n in os.listdir(root) if SNAP_RE.match(n))
+    except OSError:
+        return []
+
+
+def versions(root):
+    try:
+        return sorted(n for n in os.listdir(os.path.join(root, "Older versions")) if SNAP_RE.match(n))
+    except OSError:
+        return []
+
+
+def stamp_time(name):
+    return time.mktime(time.strptime(name, STAMP))
+
+
+def notify(summary, body, urgency="normal"):
+    subprocess.run(["notify-send", "-a", "Backup", "-i", "drive-harddisk", "-u", urgency, summary, body],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ------------------------------------------------------------------- run --
+
+def thin(root, names):
+    """Keep every backup from the last day, one a day for a month, then one
+    a week. Returns the names to delete."""
+    now = time.time()
+    keep, seen_days, seen_weeks = set(), set(), set()
+    for name in reversed(names):                # newest first
+        t = stamp_time(name)
+        age = now - t
+        if age < 86400:
+            keep.add(name)
+            continue
+        day = time.strftime("%Y-%m-%d", time.localtime(t))
+        week = time.strftime("%G-%V", time.localtime(t))
+        if age < 31 * 86400:
+            if day not in seen_days:
+                seen_days.add(day)
+                keep.add(name)
+        elif week not in seen_weeks:
+            seen_weeks.add(week)
+            keep.add(name)
+    if names:
+        keep.add(names[-1])
+    return [n for n in names if n not in keep]
+
+
+def low_on_space(path):
+    """Like Time Machine: only make room when the drive is nearly full."""
+    st = os.statvfs(path)
+    free = st.f_bavail * st.f_frsize
+    return free < 2 * 1024 ** 3 or (st.f_blocks and st.f_bavail / st.f_blocks < 0.03)
+
+
+def out_of_space(err):
+    return "No space left" in err or "ENOSPC" in err
+
+
+def rsync(args, progress_cb=None):
+    cmd = ["rsync", "--info=progress2", "--no-inc-recursive", "--human-readable"] + args
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    last = 0
+    buf = ""
+    while True:
+        ch = proc.stdout.read(1)
+        if not ch:
+            break
+        if ch in "\r\n":
+            m = re.search(r"(\d+)%", buf)
+            if m and progress_cb and time.time() - last > 1:
+                progress_cb(int(m.group(1)))
+                last = time.time()
+            buf = ""
+        else:
+            buf += ch
+    err = proc.stderr.read()
+    rc = proc.wait()
+    return rc, err
+
+
+def run_backup(quiet=False):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(LOCK, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("A backup is already running.", file=sys.stderr)
+            return 0
+        try:
+            return _run_backup(quiet)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _run_backup(quiet):
+    conf = load_conf()
+    if not conf.get("DEST"):
+        print("No backup destination is set.", file=sys.stderr)
+        return 2
+    if not dest_available(conf):
+        save_state(last_attempt=time.time(), message="The backup drive isn't connected")
+        return 3
+    root = target_root(conf["DEST"])
+    os.makedirs(root, exist_ok=True)
+    exfile = os.path.join(STATE_DIR, "backup.excludes")
+    with open(exfile, "w") as fh:
+        fh.write("\n".join("/" + e if not e.startswith("*") else e for e in excludes(conf)) + "\n")
+    started = time.time()
+    save_state(running=True, progress=0, started=started, pid=os.getpid(), message="Backing up…")
+    progress = lambda p: save_state(progress=p)  # noqa: E731
+    name = time.strftime(STAMP)
+    hardlinks = can_hardlink(root)
+    try:
+        if hardlinks:
+            snaps = snapshots(root)
+            partial = os.path.join(root, name + ".partial")
+            for old in os.listdir(root):        # leftovers from an interrupted backup
+                if old.endswith(".partial") and old != name + ".partial":
+                    shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+            args = ["-aHX", "--delete", "--exclude-from", exfile]
+            if snaps:
+                args.append("--link-dest=" + os.path.join(root, snaps[-1]))
+            for _attempt in range(4):
+                rc, err = rsync(args + [HOME + "/", partial + "/"], progress)
+                if rc in (0, 24) or not out_of_space(err) or len(snaps) < 2:
+                    break
+                # The drive is full: remove the oldest backup and carry on
+                shutil.rmtree(os.path.join(root, snaps.pop(0)), ignore_errors=True)
+            if rc not in (0, 24):               # 24: some files vanished meanwhile
+                raise RuntimeError(err.strip().splitlines()[-1] if err.strip() else f"rsync failed ({rc})")
+            os.rename(partial, os.path.join(root, name))
+            mode = "snapshots"
+            for old in thin(root, snapshots(root)):
+                shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+            snaps = snapshots(root)
+            while low_on_space(root) and len(snaps) > 1:          # make room for the next one
+                shutil.rmtree(os.path.join(root, snaps.pop(0)), ignore_errors=True)
+        else:
+            latest = os.path.join(root, "Latest")
+            older = os.path.join(root, "Older versions", name)
+            args = ["-rt", "--modify-window=2", "--delete", "--exclude-from", exfile,
+                    "--backup", "--backup-dir=" + older]
+            rc, err = rsync(args + [HOME + "/", latest + "/"], progress)
+            if rc not in (0, 23, 24):           # 23: some files can't be stored here (names, links)
+                raise RuntimeError(err.strip().splitlines()[-1] if err.strip() else f"rsync failed ({rc})")
+            mode = "latest"
+            # Older versions are what changed each hour: they're only removed
+            # when the drive gets full
+            vers = versions(root)
+            while low_on_space(root) and vers:
+                shutil.rmtree(os.path.join(root, "Older versions", vers.pop(0)), ignore_errors=True)
+    except Exception as e:  # noqa: BLE001
+        save_state(running=False, last_attempt=time.time(), message=f"The backup didn't finish: {e}",
+                   error=str(e))
+        if not quiet:
+            notify("Backup didn't finish", str(e), "critical")
+        return 1
+    first = not load_state().get("last_success")
+    save_state(running=False, progress=100, last_success=time.time(), last_attempt=time.time(),
+               mode=mode, error="", message="", duration=time.time() - started)
+    if first and not quiet:
+        notify("Your first backup is done", "From now on Firox Linux backs up every hour while "
+               f"{os.path.basename(conf['DEST']) or conf['DEST']} is connected.")
+    return 0
+
+
+def due(conf):
+    state = load_state()
+    last = state.get("last_success") or 0
+    return conf.get("ENABLED", "1") != "0" and conf.get("DEST") and time.time() - last >= EVERY
+
+
+def watch():
+    """Back up when due and the destination is there; also as soon as the
+    backup drive is plugged in."""
+    import gi
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio, GLib
+
+    def check(*_a):
+        conf = load_conf()
+        if due(conf) and not load_state().get("running") and os.path.isdir(conf.get("DEST", "") or "/nonexistent"):
+            subprocess.Popen([sys.argv[0], "run"], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    if load_state().get("running"):
+        save_state(running=False)               # left over from a crash or a log off
+    monitor = Gio.VolumeMonitor.get()
+    monitor.connect("mount-added", lambda *_a: GLib.timeout_add_seconds(5, lambda: check() and False))
+    GLib.timeout_add_seconds(120, lambda: check() and False)
+    GLib.timeout_add_seconds(600, check)
+    GLib.MainLoop().run()
+
+
+# --------------------------------------------------------------------- UI --
+
+def ui(page=None):
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gio, GLib, Gtk
+
+    def human(n):
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or unit == "TB":
+                return f"{n:.0f} {unit}" if unit in ("B", "KB", "MB") else f"{n:.1f} {unit}"
+            n /= 1024
+
+    def when(t):
+        if not t:
+            return "never"
+        lt = time.localtime(t)
+        today = time.localtime()
+        clock = time.strftime("%I:%M %p", lt).lstrip("0")
+        if lt[:3] == today[:3]:
+            return f"today at {clock}"
+        if time.localtime(time.time() - 86400)[:3] == lt[:3]:
+            return f"yesterday at {clock}"
+        return time.strftime("%A, %B ", lt) + str(lt.tm_mday) + f" at {clock}"
+
+    def label_for(name):
+        return when(stamp_time(name)).capitalize()
+
+    class Main(Gtk.ApplicationWindow):
+        def __init__(self, app):
+            super().__init__(application=app, title="Backup and Restore")
+            self.set_default_size(560, 470)
+            self.set_icon_name("drive-harddisk")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            box.set_border_width(16)
+            self.add(box)
+            head = Gtk.Box(spacing=12)
+            head.pack_start(Gtk.Image.new_from_icon_name("drive-harddisk", Gtk.IconSize.DIALOG), False, False, 0)
+            intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+            intro.set_markup("<span size='large'><b>Back up your files</b></span>\n"
+                             "Copies of everything in your home folder are made every hour to a USB drive "
+                             "or a network folder, so you can get back a file you deleted or changed, or "
+                             "everything if this computer breaks.")
+            head.pack_start(intro, True, True, 0)
+            box.pack_start(head, False, False, 0)
+
+            frame = Gtk.Frame(label="Status")
+            grid = Gtk.Grid(column_spacing=14, row_spacing=6)
+            grid.set_border_width(10)
+            frame.add(grid)
+            self.values = {}
+            for i, key in enumerate(("Back up to", "Last backup", "Oldest backup", "Space")):
+                grid.attach(Gtk.Label(label=key + ":", xalign=0), 0, i, 1, 1)
+                v = Gtk.Label(xalign=0, wrap=True, max_width_chars=44)
+                v.set_hexpand(True)
+                grid.attach(v, 1, i, 1, 1)
+                self.values[key] = v
+            self.progress = Gtk.ProgressBar(show_text=True)
+            self.progress.set_no_show_all(True)
+            grid.attach(self.progress, 0, 4, 2, 1)
+            self.msg = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+            self.msg.set_no_show_all(True)
+            grid.attach(self.msg, 0, 5, 2, 1)
+            box.pack_start(frame, False, False, 0)
+
+            row = Gtk.Box(spacing=8)
+            self.b_now = Gtk.Button.new_with_mnemonic("_Back up now")
+            self.b_now.connect("clicked", lambda _b: self.back_up_now())
+            self.b_dest = Gtk.Button.new_with_mnemonic("_Choose where…")
+            self.b_dest.connect("clicked", lambda _b: self.choose_dest())
+            self.b_restore = Gtk.Button.new_with_mnemonic("_Restore files…")
+            self.b_restore.connect("clicked", lambda _b: Restore(self).show_all())
+            for b in (self.b_now, self.b_dest, self.b_restore):
+                row.pack_start(b, False, False, 0)
+            box.pack_start(row, False, False, 0)
+
+            opts = Gtk.Box(spacing=8)
+            self.auto = Gtk.CheckButton(label="Back up automatically every hour")
+            self.auto.connect("toggled", self.on_auto)
+            opts.pack_start(self.auto, False, False, 0)
+            excl = Gtk.Button(label="Leave out folders…")
+            excl.connect("clicked", lambda _b: self.edit_excludes())
+            opts.pack_end(excl, False, False, 0)
+            box.pack_start(opts, False, False, 0)
+            note = Gtk.Label(xalign=0, wrap=True, max_width_chars=64)
+            note.get_style_context().add_class("dim-label")
+            note.set_text("Caches, the Recycle Bin and app containers are left out. Your backups are ordinary "
+                          "folders on the drive (\"Firox Backups\"), so you can open them on any computer.")
+            box.pack_start(note, False, False, 0)
+            self.refresh()
+            GLib.timeout_add_seconds(1, self.refresh)
+
+        def refresh(self):
+            conf = load_conf()
+            state = load_state()
+            self._sync_auto = True
+            self.auto.set_active(conf.get("ENABLED", "1") != "0")
+            self._sync_auto = False
+            dest = conf.get("DEST")
+            avail = bool(dest) and os.path.isdir(dest)
+            self.values["Back up to"].set_text(
+                (conf.get("DEST_URI") or dest) + ("" if avail else "  (not connected)") if dest else
+                "Nowhere yet: click Choose where…")
+            self.values["Last backup"].set_text(when(state.get("last_success")).capitalize())
+            oldest = "-"
+            space = "-"
+            if avail:
+                root = target_root(dest)
+                snaps = snapshots(root) or versions(root)
+                if snaps:
+                    oldest = label_for(snaps[0])
+                try:
+                    st = os.statvfs(dest)
+                    space = f"{human(st.f_bavail * st.f_frsize)} free of {human(st.f_blocks * st.f_frsize)}"
+                except OSError:
+                    pass
+            self.values["Oldest backup"].set_text(oldest)
+            self.values["Space"].set_text(space)
+            running = state.get("running") and pid_alive(state.get("pid"))
+            self.progress.set_visible(bool(running))
+            if running:
+                self.progress.set_fraction((state.get("progress") or 0) / 100)
+                self.progress.set_text(f"Backing up… {state.get('progress') or 0}%")
+            msg = "" if running else (state.get("message") or "")
+            self.msg.set_visible(bool(msg))
+            self.msg.set_text(msg)
+            self.b_now.set_sensitive(bool(dest) and not running)
+            self.b_restore.set_sensitive(avail)
+            return True
+
+        def on_auto(self, b):
+            if getattr(self, "_sync_auto", False):
+                return
+            conf = load_conf()
+            conf["ENABLED"] = "1" if b.get_active() else "0"
+            save_conf(conf)
+
+        def back_up_now(self):
+            save_state(message="")
+            subprocess.Popen([sys.argv[0], "run"], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            GLib.timeout_add(500, lambda: self.refresh() and False)
+
+        def choose_dest(self):
+            dlg = Gtk.Dialog(title="Where to back up", transient_for=self, modal=True)
+            dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            ok = dlg.add_button("Use this", Gtk.ResponseType.OK)
+            dlg.set_default_size(460, 340)
+            area = dlg.get_content_area()
+            area.set_border_width(12)
+            area.set_spacing(8)
+            area.pack_start(Gtk.Label(label="Drives connected to this computer:", xalign=0), False, False, 0)
+            lb = Gtk.ListBox()
+            mounts = [m for m in Gio.VolumeMonitor.get().get_mounts()
+                      if m.get_root().get_path() and not m.get_root().get_path().startswith("/run/user/")]
+            for m in mounts:
+                path = m.get_root().get_path()
+                row = Gtk.ListBoxRow()
+                row.firox_path, row.firox_uri = path, ""
+                h = Gtk.Box(spacing=10)
+                h.set_border_width(6)
+                img = Gtk.Image.new_from_gicon(m.get_icon(), Gtk.IconSize.DND)
+                h.pack_start(img, False, False, 0)
+                try:
+                    st = os.statvfs(path)
+                    free = f"{human(st.f_bavail * st.f_frsize)} free of {human(st.f_blocks * st.f_frsize)}"
+                except OSError:
+                    free = ""
+                lab = Gtk.Label(xalign=0)
+                lab.set_markup(f"<b>{GLib.markup_escape_text(m.get_name())}</b>\n<small>{free}</small>")
+                h.pack_start(lab, True, True, 0)
+                row.add(h)
+                lb.add(row)
+            if not mounts:
+                lb.add(Gtk.Label(label="No USB drive is plugged in.", margin=12))
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.set_shadow_type(Gtk.ShadowType.IN)
+            sw.add(lb)
+            area.pack_start(sw, True, True, 0)
+            area.pack_start(Gtk.Label(label="Or a network folder (e.g. smb://nas/backups), or any folder:",
+                                      xalign=0), False, False, 0)
+            other = Gtk.Box(spacing=6)
+            entry = Gtk.Entry(placeholder_text="smb://server/share/folder")
+            other.pack_start(entry, True, True, 0)
+            browse = Gtk.Button(label="Browse…")
+            other.pack_start(browse, False, False, 0)
+            area.pack_start(other, False, False, 0)
+            status = Gtk.Label(xalign=0, wrap=True)
+            area.pack_start(status, False, False, 0)
+
+            def on_browse(_b):
+                fc = Gtk.FileChooserDialog(title="Back up to", transient_for=dlg,
+                                           action=Gtk.FileChooserAction.SELECT_FOLDER)
+                fc.add_button("Cancel", Gtk.ResponseType.CANCEL)
+                fc.add_button("Choose", Gtk.ResponseType.OK)
+                if fc.run() == Gtk.ResponseType.OK:
+                    entry.set_text(fc.get_filename() or fc.get_uri() or "")
+                fc.destroy()
+            browse.connect("clicked", on_browse)
+            dlg.show_all()
+            while dlg.run() == Gtk.ResponseType.OK:
+                row = lb.get_selected_row()
+                text = entry.get_text().strip()
+                path, uri = None, ""
+                if text:
+                    if "://" in text:
+                        status.set_text("Connecting…")
+                        while Gtk.events_pending():
+                            Gtk.main_iteration()
+                        r = subprocess.run(["gio", "mount", text], capture_output=True, text=True, timeout=120)
+                        f = Gio.File.new_for_uri(text)
+                        path, uri = f.get_path(), text
+                        if not path or not os.path.isdir(path):
+                            status.set_text("Couldn't open that network folder. " + (r.stderr.strip()[-200:]))
+                            continue
+                    else:
+                        path = os.path.expanduser(text)
+                elif row is not None and hasattr(row, "firox_path"):
+                    path = row.firox_path
+                if not path:
+                    status.set_text("Pick a drive, or type a folder.")
+                    continue
+                if os.path.realpath(path).startswith(os.path.realpath(HOME) + os.sep) or \
+                        os.path.realpath(path) == os.path.realpath(HOME):
+                    status.set_text("Choose a place outside your home folder (a USB drive or a network folder).")
+                    continue
+                try:
+                    os.makedirs(target_root(path), exist_ok=True)
+                except OSError as e:
+                    status.set_text(f"Can't write there: {e.strerror}")
+                    continue
+                conf = load_conf()
+                conf.update(DEST=path, DEST_URI=uri)
+                save_conf(conf)
+                if not can_hardlink(target_root(path)):
+                    m = Gtk.MessageDialog(transient_for=dlg, modal=True, message_type=Gtk.MessageType.INFO,
+                                          buttons=Gtk.ButtonsType.OK,
+                                          text="This place keeps one up-to-date copy")
+                    m.format_secondary_text(
+                        "It can't store hourly snapshots (a FAT/exFAT drive or a network share), so Firox "
+                        "keeps the latest copy of your files, plus older versions of files you change or "
+                        "delete. For full hourly history, use a drive formatted as ext4 or NTFS.")
+                    m.run()
+                    m.destroy()
+                break
+            dlg.destroy()
+            self.refresh()
+
+        def edit_excludes(self):
+            conf = load_conf()
+            dlg = Gtk.Dialog(title="Leave out folders", transient_for=self, modal=True)
+            dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            dlg.add_button("OK", Gtk.ResponseType.OK)
+            dlg.set_default_size(420, 300)
+            area = dlg.get_content_area()
+            area.set_border_width(12)
+            area.set_spacing(6)
+            area.pack_start(Gtk.Label(label="These folders in your home folder aren't backed up:", xalign=0),
+                            False, False, 0)
+            store = Gtk.ListStore(str)
+            for e in [e for e in conf.get("EXCLUDES", "").split(":") if e]:
+                store.append([e])
+            view = Gtk.TreeView(model=store, headers_visible=False)
+            view.append_column(Gtk.TreeViewColumn("Folder", Gtk.CellRendererText(), text=0))
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.set_shadow_type(Gtk.ShadowType.IN)
+            sw.add(view)
+            area.pack_start(sw, True, True, 0)
+            row = Gtk.Box(spacing=6)
+            add = Gtk.Button(label="Add…")
+            rem = Gtk.Button(label="Remove")
+            row.pack_start(add, False, False, 0)
+            row.pack_start(rem, False, False, 0)
+            area.pack_start(row, False, False, 0)
+
+            def on_add(_b):
+                fc = Gtk.FileChooserDialog(title="Leave out", transient_for=dlg,
+                                           action=Gtk.FileChooserAction.SELECT_FOLDER)
+                fc.add_button("Cancel", Gtk.ResponseType.CANCEL)
+                fc.add_button("Leave out", Gtk.ResponseType.OK)
+                fc.set_current_folder(HOME)
+                if fc.run() == Gtk.ResponseType.OK and fc.get_filename():
+                    rel = os.path.relpath(fc.get_filename(), HOME)
+                    if not rel.startswith(".."):
+                        store.append([rel])
+                fc.destroy()
+
+            def on_rem(_b):
+                model, it = view.get_selection().get_selected()
+                if it is not None:
+                    model.remove(it)
+            add.connect("clicked", on_add)
+            rem.connect("clicked", on_rem)
+            dlg.show_all()
+            if dlg.run() == Gtk.ResponseType.OK:
+                conf["EXCLUDES"] = ":".join(r[0] for r in store)
+                save_conf(conf)
+            dlg.destroy()
+
+    class Restore(Gtk.Window):
+        """Pick a backup on the left, files on the right."""
+
+        def __init__(self, parent):
+            super().__init__(title="Restore Files")
+            if parent is not None:
+                self.set_transient_for(parent)
+            self.set_default_size(760, 520)
+            self.set_icon_name("document-revert")
+            conf = load_conf()
+            self.root = target_root(conf.get("DEST", ""))
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            outer.set_border_width(12)
+            self.add(outer)
+            intro = Gtk.Label(xalign=0, wrap=True)
+            intro.set_markup("<b>Pick a backup, then the files and folders to get back.</b> Restored files "
+                             "go back where they were; if something of the same name is there, the restored "
+                             "copy gets \"(restored)\" in its name.")
+            outer.pack_start(intro, False, False, 0)
+            paned = Gtk.Paned()
+            outer.pack_start(paned, True, True, 0)
+            self.snaps = Gtk.ListStore(str, str)       # label, folder
+            for name in reversed(snapshots(self.root)):
+                self.snaps.append([label_for(name), os.path.join(self.root, name)])
+            if os.path.isdir(os.path.join(self.root, "Latest")):
+                self.snaps.append(["Latest copy", os.path.join(self.root, "Latest")])
+                for name in reversed(versions(self.root)):
+                    self.snaps.append([f"Older versions from {when(stamp_time(name))}",
+                                       os.path.join(self.root, "Older versions", name)])
+            lv = Gtk.TreeView(model=self.snaps)
+            lv.append_column(Gtk.TreeViewColumn("Backups", Gtk.CellRendererText(), text=0))
+            lv.get_selection().connect("changed", self.on_snap)
+            sw = Gtk.ScrolledWindow()
+            sw.set_shadow_type(Gtk.ShadowType.IN)
+            sw.set_size_request(230, -1)
+            sw.add(lv)
+            paned.pack1(sw, False, False)
+            self.files = Gtk.TreeStore(Gio.Icon, str, str, bool, bool)   # icon, name, path, is_dir, loaded
+            self.fv = Gtk.TreeView(model=self.files)
+            col = Gtk.TreeViewColumn("Name")
+            pix = Gtk.CellRendererPixbuf()
+            col.pack_start(pix, False)
+            col.add_attribute(pix, "gicon", 0)
+            txt = Gtk.CellRendererText()
+            col.pack_start(txt, True)
+            col.add_attribute(txt, "text", 1)
+            self.fv.append_column(col)
+            self.fv.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
+            self.fv.connect("row-expanded", self.on_expand)
+            sw2 = Gtk.ScrolledWindow()
+            sw2.set_shadow_type(Gtk.ShadowType.IN)
+            sw2.add(self.fv)
+            paned.pack2(sw2, True, False)
+            row = Gtk.Box(spacing=8)
+            self.status = Gtk.Label(xalign=0)
+            row.pack_start(self.status, True, True, 0)
+            b_open = Gtk.Button(label="Open in File Manager")
+            b_open.connect("clicked", lambda _b: self.open_folder())
+            b_all = Gtk.Button(label="Restore everything…")
+            b_all.connect("clicked", lambda _b: self.restore_all())
+            b_sel = Gtk.Button(label="Restore selected")
+            b_sel.get_style_context().add_class("suggested-action")
+            b_sel.connect("clicked", lambda _b: self.restore_selected())
+            for b in (b_open, b_all, b_sel):
+                row.pack_start(b, False, False, 0)
+            outer.pack_start(row, False, False, 0)
+            self.current = None
+            if len(self.snaps):
+                lv.get_selection().select_path(Gtk.TreePath.new_first())
+            else:
+                self.status.set_text("There are no backups here yet.")
+
+        def on_snap(self, sel):
+            model, it = sel.get_selected()
+            if it is None:
+                return
+            self.current = model[it][1]
+            self.files.clear()
+            self.fill(None, self.current)
+
+        def fill(self, parent, folder):
+            try:
+                names = sorted(os.listdir(folder), key=lambda n: (not os.path.isdir(os.path.join(folder, n)),
+                                                                  n.startswith("."), n.lower()))
+            except OSError:
+                return
+            for n in names:
+                p = os.path.join(folder, n)
+                is_dir = os.path.isdir(p) and not os.path.islink(p)
+                icon = Gio.ThemedIcon.new("folder" if is_dir else "text-x-generic")
+                it = self.files.append(parent, [icon, n, p, is_dir, False])
+                if is_dir:
+                    self.files.append(it, [icon, "", "", False, False])   # placeholder for the expander
+
+        def on_expand(self, _view, it, path):
+            if self.files[it][4]:
+                return
+            self.files[it][4] = True
+            child = self.files.iter_children(it)
+            if child is not None:
+                self.files.remove(child)
+            self.fill(it, self.files[it][2])
+            self.fv.expand_row(path, False)
+
+        def target_for(self, src):
+            rel = os.path.relpath(src, self.current)
+            dst = os.path.join(HOME, rel)
+            if os.path.exists(dst):
+                base, ext = os.path.splitext(dst)
+                if os.path.isdir(src):
+                    base, ext = dst, ""
+                dst = f"{base} (restored){ext}"
+                n = 2
+                while os.path.exists(dst):
+                    dst = f"{base} (restored {n}){ext}"
+                    n += 1
+            return dst
+
+        def restore_selected(self):
+            model, paths = self.fv.get_selection().get_selected_rows()
+            srcs = [model[p][2] for p in paths if model[p][2]]
+            if not srcs:
+                self.status.set_text("Select files or folders first.")
+                return
+            done = 0
+            for src in srcs:
+                dst = self.target_for(src)
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst, symlinks=True)
+                    else:
+                        shutil.copy2(src, dst, follow_symlinks=False)
+                    done += 1
+                except OSError as e:
+                    self.status.set_text(f"Couldn't restore {os.path.basename(src)}: {e.strerror}")
+            if done:
+                self.status.set_text(f"Restored {done} item{'s' if done != 1 else ''} to your home folder.")
+
+        def restore_all(self):
+            if self.current is None:
+                return
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                    buttons=Gtk.ButtonsType.NONE, text="Restore everything from this backup?")
+            dlg.format_secondary_text("Files from the backup are copied into your home folder, replacing the "
+                                      "versions there. Files that aren't in the backup are left alone.")
+            dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            dlg.add_button("Restore everything", Gtk.ResponseType.OK)
+            ok = dlg.run() == Gtk.ResponseType.OK
+            dlg.destroy()
+            if not ok:
+                return
+            self.status.set_text("Restoring…")
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            r = subprocess.run(["rsync", "-a", self.current + "/", HOME + "/"], capture_output=True, text=True)
+            self.status.set_text("Everything was restored." if r.returncode in (0, 24) else
+                                 "Some files couldn't be restored: " + r.stderr.strip()[-200:])
+
+        def open_folder(self):
+            if self.current:
+                Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(self.current).get_uri(), None)
+
+    class App(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id="org.firox.Backup",
+                             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+
+        def do_command_line(self, cmdline):
+            args = cmdline.get_arguments()[1:]
+            win = self.get_active_window()
+            if win is None:
+                win = Main(self)
+                win.show_all()
+            win.present()
+            if args[:1] == ["restore"] and load_conf().get("DEST"):
+                Restore(win).show_all()
+            return 0
+
+    return App().run([sys.argv[0]] + ([page] if page else []))
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "run":
+        return run_backup(quiet="--quiet" in argv)
+    if cmd == "watch":
+        watch()
+        return 0
+    if cmd == "status":
+        conf, state = load_conf(), load_state()
+        print(f"destination: {conf.get('DEST') or 'none'}  automatic: {'on' if conf.get('ENABLED') != '0' else 'off'}")
+        print(f"last backup: {time.ctime(state['last_success']) if state.get('last_success') else 'never'}")
+        if state.get("message"):
+            print(state["message"])
+        return 0
+    if cmd in ("", "restore"):
+        return ui(cmd)
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

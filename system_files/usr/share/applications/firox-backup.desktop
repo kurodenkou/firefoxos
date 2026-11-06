@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Backup and Restore
+Comment=Back up your files to a USB drive or network folder, and get them back
+Exec=firox-backup
+Icon=drive-harddisk
+Categories=System;Utility;
+Keywords=backup;restore;time machine;usb;copy;
+StartupNotify=false

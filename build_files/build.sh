@@ -94,6 +94,8 @@ PACKAGES=(
     vlc                          # Media Player (music, videos, DVDs)
     vlc-plugin-ffmpeg            # VLC's codecs (weak deps are off; uses the base's full ffmpeg)
     fastfetch
+    rsync                        # Backup and Restore (firox-backup)
+    syncthing                    # Sync between Firox computers (firox-sync)
 
     # --- Screen savers (Control Panel > Screen Saver) ---
     asciiquarium
@@ -163,6 +165,13 @@ systemctl set-default graphical.target
 
 # Waydroid container manager (images are downloaded by `ujust setup-waydroid`)
 systemctl enable waydroid-container.service
+
+# Sync between Firox computers: Bonjour (Avahi) discovery, Syncthing, and
+# firox-sync's pairing port. Nothing listens on them unless Sync is on.
+for zone in public home FedoraWorkstation; do
+    firewall-offline-cmd --zone="${zone}" --add-service=mdns --add-service=syncthing \
+        --add-port=22100/tcp >/dev/null 2>&1 || true
+done
 
 # Power profiles (tuned, with the power-profiles-daemon D-Bus API)
 systemctl enable tuned.service tuned-ppd.service
