@@ -64,6 +64,8 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 | Desktop Gadgets | `firox-gadgets`: a Vista-style Sidebar on the right of the desktop (layer-shell, behind windows) with Clock, Calendar, CPU Meter, Weather (Open-Meteo, no account; set your city in its options), Slide Show (your Pictures folder) and Notes. **+ Gadgets** opens the gallery; hover a gadget for ×, right-click for Options, Move up/down, Close, Hide. On at login; turn it off in Settings → Taskbar. Settings: `~/.config/firox/gadgets.conf` |
 | Task Manager | `firox-taskmgr` (Ctrl+Alt+Del, Ctrl+Shift+Esc): **Applications** (open windows: Switch To, End Task), **Processes** (CPU and memory per process, sortable, all users optional, End Process) and **Performance** (green-on-black CPU and memory history graphs, totals, physical memory, swap). btop is in the Start menu as Resource Monitor |
 | System Restore | `firox-restore` (Settings → System Restore): lists the installed versions of Firox Linux (`rpm-ostree status`) and restores the previous one (`rpm-ostree rollback`, with Undo), keeps a version past later updates (`ostree admin pin`), shows what changed between versions, cancels a waiting update, and pauses automatic updates so a restored version stays. Files, settings and Flatpaks aren't affected |
+| Backup and Restore | `firox-backup` (Settings → Backup and Restore): backs up your home folder every hour to a USB drive or a network folder (smb://…), and as soon as the backup drive is plugged in. Each backup is a dated folder with a complete copy, unchanged files hard-linked to the previous one (rsync `--link-dest`, like the original Time Machine); hourly kept for a day, daily for a month, then weekly, oldest removed when the drive is full. Drives without hard links (FAT/exFAT, most shares) get a Latest copy plus Older versions. Restore window: pick a backup by date, pick files, Restore (or Restore everything). Backups are plain folders you can open anywhere |
+| Sync | `firox-sync` (Settings → Sync): Firox computers on the same network find each other with Avahi (Bonjour, `_firox-sync._tcp`), pair with a 6-digit PIN shown on the other computer (HMAC proof over both IDs; the PIN never crosses the network), and keep the folders you tick (Documents, Pictures, Music, Videos, Desktop) the same on all of them. The engine is a private Syncthing instance, local network only (no global discovery or relays); replaced or deleted files are kept 30 days in `.stversions` |
 | Extras | mako "balloon" notifications, fuzzel Run dialog, swaylock, xfce4-terminal "Command Prompt" (tabs, Edit > Preferences; Super+Enter), btop "Task Manager", VLC "Media Player" (music, videos, DVDs; full codecs from the base image) |
 
 ![Taskbar: a group of three terminals opened, the same windows ungrouped, and the Modern look](docs/screenshots/taskbar.png)
@@ -75,6 +77,10 @@ Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `uju
 ![Task Manager: Processes and Performance](docs/screenshots/task-manager.png)
 
 ![System Restore](docs/screenshots/system-restore.png)
+
+![Backup and Restore](docs/screenshots/backup.png)
+
+![Sync: the Sync window and the PIN on the other computer](docs/screenshots/sync.png)
 
 ![Boot splash](docs/screenshots/boot-splash.png)
 
