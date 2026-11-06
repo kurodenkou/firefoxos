@@ -1,0 +1,60 @@
+/* Notification panel (firox-notifications), Glass look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    color: #1c1c1e;
+    margin: 0 8px 8px 0;
+    
+    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.94), rgba(242, 244, 248, 0.86));
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 1);
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(10, 20, 50, 0.28), inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+#panel-header { padding: 10px 14px 8px 14px; border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
+#panel-header .title { color: #1c1c1e; font-size: 13px; font-weight: bold; }
+#panel-footer { padding: 6px 10px; border-top: 1px solid rgba(0, 0, 0, 0.06); }
+#panel-footer button.link { background: transparent; background-image: none; border: none; box-shadow: none; padding: 2px 8px; border-radius: 10px; }
+#panel-footer button.link label { color: #0a64d6; }
+#panel-footer button.link:hover { background-color: rgba(10, 100, 214, 0.10); }
+#panel-header .title { font-size: 14px; }
+#panel-header button.link {
+    color: #0a64d6;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+#panel-header button.link label { color: #0a64d6; }
+#panel-header button.link:hover { background-color: rgba(10, 100, 214, 0.10); }
+#panel-header button.link:disabled label { color: #b0b0b5; }
+
+#list { padding: 6px; }
+#empty { padding: 28px; color: #6e6e73; }
+
+.notification {
+    border-radius: 14px;
+    margin: 3px 0;
+    background-color: rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+.notification .inner { padding: 8px 10px; }
+.notification:hover { background-color: rgba(255, 255, 255, 0.85); }
+.notification.new { background-color: rgba(10, 100, 214, 0.10); }
+.notification.critical .summary { color: #c41e1e; }
+.notification .app { color: #6e6e73; font-size: 11px; }
+.notification .time { color: #8e8e93; font-size: 11px; }
+.notification label { font-size: 12px; }
+.notification .summary { color: #1c1c1e; font-weight: bold; }
+.notification .body { color: #3a3a3c; }
+.notification button.close {
+    min-width: 18px; min-height: 18px; padding: 0;
+    background: transparent; border: none; box-shadow: none;
+    color: #8e8e93;
+}
+.notification button.close:hover { color: #1c1c1e; background-color: rgba(0, 0, 0, 0.08); border-radius: 9px; }
+#panel-footer { padding: 8px 12px; }
+#panel-footer small { color: #6e6e73; }

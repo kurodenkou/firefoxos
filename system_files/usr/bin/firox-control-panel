@@ -42,7 +42,7 @@ APPLETS = [
     ("preferences-system-power", "Power Options", "Turn off the monitor and sleep when idle", ["@power"]),
     ("input-mouse", "Mouse", "Pointer speed, buttons, scrolling and touchpad", ["@mouse"]),
     ("input-keyboard", "Keyboard", "Layouts, repeat speed and Num Lock", ["@keyboard"]),
-    ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
+    ("preferences-desktop-theme", "Appearance", "Classic, Modern or Glass look, light or dark apps", ["@appearance"]),
     ("preferences-desktop", "Taskbar", "Auto-hide, Quick Launch, grouping and the clock", ["@taskbar"]),
     ("system-run", "Startup Programs", "Choose what starts when you log in", ["firox-startup"]),
     ("preferences-desktop-default-applications", "Default Programs",
@@ -300,7 +300,7 @@ class AppearanceDialog(Gtk.Dialog):
             row.pack_start(radio, False, False, 0)
         box.pack_start(row, False, False, 0)
         hint = Gtk.Label(xalign=0)
-        hint.set_markup("<small>Match the look: dark with Modern, light with Classic.</small>")
+        hint.set_markup("<small>Match the look: dark with Modern, light with Classic and Glass.</small>")
         box.pack_start(hint, False, False, 0)
         self.theme_before = current
         self.show_all()

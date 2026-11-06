@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-# firox-theme: switch the desktop between the "classic" (blue/green XP-style)
-# and "modern" (grey, translucent) looks. The layout is identical; only styling
+# firox-theme: switch the desktop between the "classic" (blue/green XP-style),
+# "modern" (grey, translucent) and "glass" (frosted glass) looks. The layout is identical; only styling
 # changes. Per-user; the choice lives in ~/.config/firox/theme.
 #
 #   firox-theme                 print the current theme
