@@ -4,7 +4,19 @@
 [customizations.installer.kickstart]
 contents = """
 %post
-bootc switch --mutate-in-place --transport registry ghcr.io/kurodenkou/firox:latest
+# Point updates at the published image this ISO was built from: the
+# standard image or the NVIDIA one (the image records which in
+# /usr/share/firox/image-ref; images built before that file existed are
+# recognised by their NVIDIA driver packages).
+ref="$(cat /usr/share/firox/image-ref 2>/dev/null)"
+if [ -z "$ref" ]; then
+    if rpm -qa 'kmod-nvidia*' 'nvidia-driver*' | grep -q .; then
+        ref=ghcr.io/kurodenkou/firox-nvidia-open:latest
+    else
+        ref=ghcr.io/kurodenkou/firox:latest
+    fi
+fi
+bootc switch --mutate-in-place --transport registry "$ref"
 %end
 """
 

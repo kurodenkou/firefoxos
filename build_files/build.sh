@@ -189,6 +189,16 @@ sed -i \
     /usr/lib/os-release
 grep -q '^DEFAULT_HOSTNAME=' /usr/lib/os-release || echo 'DEFAULT_HOSTNAME="firox"' >> /usr/lib/os-release
 
+# Where this image's updates come from. The installer ISO's %post reads it
+# (disk_config/iso.toml), so a system installed from an NVIDIA ISO keeps
+# updating from the NVIDIA image instead of switching to the plain one.
+FIROX_IMAGE_REPO="${FIROX_IMAGE_REPO:-ghcr.io/kurodenkou/firox}"
+if [ "${FIROX_VARIANT:-main}" = nvidia ]; then
+    FIROX_IMAGE_REPO="${FIROX_IMAGE_REPO}-nvidia-open"
+fi
+mkdir -p /usr/share/firox
+echo "${FIROX_IMAGE_REPO}:latest" > /usr/share/firox/image-ref
+
 # Boot splash: the Firox logo over Fedora's spinner (theme in
 # system_files/usr/share/plymouth/themes/firox; the spinner frames come from
 # the spinner theme, keeping our watermark.png)
