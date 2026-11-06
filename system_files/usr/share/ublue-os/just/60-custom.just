@@ -193,21 +193,41 @@ fix-realtek-audio *ARGS:
 [group('Firox Linux')]
 install-nvidia:
     #!/usr/bin/bash
-    set -euo pipefail
-    if ! lspci -nn | grep -Eiq '(VGA compatible|3D|Display) controller.*NVIDIA'; then
+    set -uo pipefail
+    gpus="$(lspci -nn 2>/dev/null)"
+    if ! grep -Eiq '(VGA compatible|3D|Display) controller.*NVIDIA' <<<"${gpus}"; then
         echo "No NVIDIA graphics card found, nothing to do."
         exit 1
     fi
     # Same check as Universal Blue: GK/GM/GP/GV chips (Kepler..Volta,
     # GTX 10-series and older) aren't supported by the open driver
-    if lspci -nn | grep -Pq "(VGA compatible|3D) controller .+G(K|M|P|V)\d{3}"; then
-        echo "This NVIDIA card is older than the GTX 16 / RTX 20 series."
+    nv="$(grep -Ei '(VGA compatible|3D|Display) controller.*NVIDIA' <<<"${gpus}")"
+    if ! grep -Pqv 'G(K|M|P|V)\d{3}' <<<"${nv}"; then
+        echo "This NVIDIA card is older than the GTX 16 / RTX 20 series:"
+        echo "  ${nv}"
         echo "Firox's NVIDIA image uses NVIDIA's open driver, which doesn't support it."
         exit 1
     fi
-    current="$(sudo bootc status --format json | jq -r '.status.booted.image.image.image')"
+    if ! status="$(sudo bootc status --format json)"; then
+        echo "Couldn't read the system status (bootc status)."
+        exit 1
+    fi
+    # What updates follow (the spec), and what's running now
+    current="$(jq -r '.spec.image.image // .status.booted.image.image.image // empty' <<<"${status}")"
+    booted="$(jq -r '.status.booted.image.image.image // empty' <<<"${status}")"
+    if [ -z "${current}" ]; then
+        echo "Couldn't tell which Firox image this computer uses. bootc status says:"
+        sudo bootc status
+        exit 1
+    fi
     case "${current}" in
-        *-nvidia-open:*|*-nvidia-open) echo "Already on the NVIDIA image (${current})."; exit 0 ;;
+        *-nvidia-open:*|*-nvidia-open)
+            if [ "${booted}" != "${current}" ]; then
+                echo "The switch to ${current} is already done: restart to use it."
+            else
+                echo "Already on the NVIDIA image (${current})."
+            fi
+            exit 0 ;;
     esac
     repo="${current%:*}"; tag="${current##*:}"
     [ "${repo}" = "${current}" ] && tag=latest
@@ -217,7 +237,11 @@ install-nvidia:
     echo "Android apps (Waydroid) will use software rendering on NVIDIA."
     read -rp "Continue? [y/N] " ans
     [[ "${ans,,}" == y* ]] || exit 0
-    sudo bootc switch "${target}"
+    if ! sudo bootc switch "${target}"; then
+        echo
+        echo "The switch failed (see above). Check the internet connection and try again."
+        exit 1
+    fi
     echo
     if mokutil --sb-state 2>/dev/null | grep -q enabled; then
         echo "Secure Boot is on. Before restarting, run:  ujust enroll-secure-boot-key"
@@ -229,13 +253,14 @@ install-nvidia:
 [group('Firox Linux')]
 remove-nvidia:
     #!/usr/bin/bash
-    set -euo pipefail
-    current="$(sudo bootc status --format json | jq -r '.status.booted.image.image.image')"
+    set -uo pipefail
+    status="$(sudo bootc status --format json)" || exit 1
+    current="$(jq -r '.spec.image.image // .status.booted.image.image.image // empty' <<<"${status}")"
     case "${current}" in
         *-nvidia-open:*) target="${current/-nvidia-open:/:}" ;;
         *) echo "Not on the NVIDIA image (${current}), nothing to do."; exit 0 ;;
     esac
     read -rp "Switch to ${target}? [y/N] " ans
     [[ "${ans,,}" == y* ]] || exit 0
-    sudo bootc switch "${target}"
+    sudo bootc switch "${target}" || exit 1
     echo "Restart to finish:  systemctl reboot"
