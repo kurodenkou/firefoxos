@@ -1,0 +1,55 @@
+/* Wi-Fi and Bluetooth pop-ups (firox-network, firox-bluetooth), Glass look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    color: #1c1c1e;
+    margin: 0 8px 8px 0;
+    min-width: 300px;
+    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.94), rgba(242, 244, 248, 0.86));
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 1);
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(10, 20, 50, 0.28), inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+#panel-header { padding: 10px 14px 8px 14px; border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
+#panel-header .title { color: #1c1c1e; font-size: 13px; font-weight: bold; }
+#panel-footer { padding: 6px 10px; border-top: 1px solid rgba(0, 0, 0, 0.06); }
+#panel-footer button.link { background: transparent; background-image: none; border: none; box-shadow: none; padding: 2px 8px; border-radius: 10px; }
+#panel-footer button.link label { color: #0a64d6; }
+#panel-footer button.link:hover { background-color: rgba(10, 100, 214, 0.10); }
+#body { padding: 8px 10px; }
+#body label { color: #1c1c1e; }
+#body .section { color: #1c1c1e; font-weight: bold; margin: 4px 4px 0 4px; }
+#body .dim { color: #6e6e73; }
+#body .message { padding: 6px 8px; background-color: rgba(255, 255, 255, 0.7); border-radius: 10px; }
+#body .message.error { background-color: rgba(255, 59, 48, 0.12); color: #a1150c; }
+
+.row { border-radius: 14px; }
+.row-top { padding: 5px 8px; }
+.row:hover { background-color: rgba(255, 255, 255, 0.70); }
+.row.expanded { background-color: rgba(255, 255, 255, 0.85); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 1), 0 1px 4px rgba(0, 0, 0, 0.08); }
+.row image { color: #1c1c1e; }
+.row .badge { color: #8e8e93; }
+.row-actions { padding: 0 8px 8px 40px; }
+
+#body button {
+    padding: 3px 14px;
+    background-image: linear-gradient(to bottom, #ffffff, #f2f2f5);
+    background-color: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+#body button label { color: #1c1c1e; }
+#body button:hover { background-image: none; background-color: #ffffff; }
+#body button.suggested-action { background-image: none; background-color: #0a64d6; border-color: #0a64d6; }
+#body button.suggested-action label { color: #ffffff; }
+#body entry { background-color: #ffffff; color: #1c1c1e; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 10px; }
+#body checkbutton label { color: #1c1c1e; }
+
+#panel-header switch { background-color: rgba(0, 0, 0, 0.12); border: none; border-radius: 14px; }
+#panel-header switch:checked { background-color: #34c759; }
+#panel-header switch slider { background-color: #ffffff; border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+scrolledwindow, viewport { background: transparent; border: none; }

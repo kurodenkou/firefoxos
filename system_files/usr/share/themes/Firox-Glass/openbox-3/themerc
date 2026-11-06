@@ -1,0 +1,81 @@
+# Firox-Glass: same layout as Firox-Luna, as frosted glass: light translucent
+# title bars with a bright rim and round glass buttons (SVGs next to this file;
+# they must exist here, or labwc would find the Luna buttons under the same
+# theme name).
+
+border.width: 1
+window.titlebar.padding.width: 6
+window.titlebar.padding.height: 3
+
+window.active.border.color: #ffffffe6
+window.inactive.border.color: #ffffffb3
+
+window.active.title.bg: Solid
+window.active.title.bg.color: #f5f6fae0
+window.inactive.title.bg: Solid
+window.inactive.title.bg.color: #eef0f5c7
+
+window.active.label.text.color: #1c1c1e
+window.inactive.label.text.color: #8e8e93
+window.label.text.justify: center
+
+window.button.width: 30
+window.button.height: 24
+window.button.spacing: 0
+
+window.active.button.unpressed.image.color: #3a3a3c
+window.inactive.button.unpressed.image.color: #9a9aa0
+
+window.active.shadow.size: 30
+window.inactive.shadow.size: 16
+window.active.shadow.color: #1a285066
+window.inactive.shadow.color: #1a285033
+
+menu.overlap.x: -2
+menu.overlap.y: 0
+menu.width.min: 140
+menu.width.max: 320
+menu.border.width: 1
+menu.border.color: #ffffff
+menu.items.bg.color: #f6f7faf0
+menu.items.text.color: #1c1c1e
+menu.items.active.bg.color: #0a64d6
+menu.items.active.text.color: #ffffff
+menu.items.padding.x: 12
+menu.items.padding.y: 5
+menu.separator.width: 1
+menu.separator.padding.width: 8
+menu.separator.padding.height: 3
+menu.separator.color: #00000018
+menu.title.bg.color: #f6f7fa
+menu.title.text.color: #1c1c1e
+menu.title.text.justify: Left
+
+osd.bg.color: #f6f7faeb
+osd.border.color: #ffffff
+osd.border.width: 1
+osd.label.text.color: #1c1c1e
+osd.window-switcher.style-classic.width: 480
+osd.window-switcher.style-classic.padding: 8
+osd.window-switcher.style-classic.item.padding.x: 10
+osd.window-switcher.style-classic.item.padding.y: 4
+osd.window-switcher.style-classic.item.active.border.width: 1
+osd.window-switcher.style-classic.item.active.border.color: #0a64d6
+osd.window-switcher.style-classic.item.active.bg.color: #0a64d622
+# Alt+Tab thumbnail grid
+osd.window-switcher.style-thumbnail.width.max: 80%
+osd.window-switcher.style-thumbnail.padding: 10
+osd.window-switcher.style-thumbnail.item.width: 230
+osd.window-switcher.style-thumbnail.item.height: 170
+osd.window-switcher.style-thumbnail.item.padding: 8
+osd.window-switcher.style-thumbnail.item.active.border.width: 2
+osd.window-switcher.style-thumbnail.item.active.border.color: #0a64d6
+osd.window-switcher.style-thumbnail.item.active.bg.color: #0a64d622
+osd.window-switcher.style-thumbnail.item.icon.size: 32
+osd.window-switcher.preview.border.width: 2
+osd.window-switcher.preview.border.color: #ffffff,#0a64d6,#ffffff
+
+snapping.overlay.region.bg.color: #ffffff40
+snapping.overlay.edge.bg.color: #ffffff40
+snapping.overlay.region.border.color: #ffffff
+snapping.overlay.edge.border.color: #ffffff

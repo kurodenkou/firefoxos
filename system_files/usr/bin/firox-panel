@@ -113,6 +113,177 @@ def theme_css():
     return path if os.path.exists(path) else os.path.join(THEMES, "classic", "panel.css")
 
 
+def theme_setting(key):
+    """KEY from the current theme's theme.conf."""
+    for line in read(os.path.join(THEMES, theme_name(), "theme.conf")).splitlines():
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+DESKTOP_CONF = os.path.join(os.path.dirname(CONFIG), "pcmanfm-qt", "firox", "settings.conf")
+
+
+class GlassBackdrop:
+    """The Glass look's taskbar: the wallpaper behind the bar, blurred and
+    slightly magnified at the top and bottom edges like a strip of glass.
+    Windows never go behind the taskbar (it reserves its space), so what's
+    behind it is always the wallpaper: drawing it ourselves gives real
+    frosted glass without the compositor blurring anything. The theme's
+    panel.css adds the frost and the bright rims on top.
+    Used when the theme's theme.conf has GLASS=1."""
+
+    PAD = 48            # rows above the bar that bleed into the blur
+
+    def __init__(self, changed):
+        self.changed = changed
+        self.cache = {}
+        self.enabled = theme_setting("GLASS") == "1"
+        folder = os.path.dirname(DESKTOP_CONF)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            self.mon = Gio.File.new_for_path(folder).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+            self.mon.connect("changed", self._desktop_changed)
+        except (OSError, GLib.Error):
+            self.mon = None
+
+    def _desktop_changed(self, _m, f, _o, event):
+        if f.get_basename() == "settings.conf" and event in (
+                Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED,
+                Gio.FileMonitorEvent.MOVED_IN):
+            self.reset()
+
+    def reset(self):
+        self.enabled = theme_setting("GLASS") == "1"
+        self.cache.clear()
+        self.changed()
+
+    @staticmethod
+    def desktop():
+        """(wallpaper, mode, background colour) from the desktop's settings."""
+        conf = {}
+        for path in (DESKTOP_CONF, "/etc/xdg/pcmanfm-qt/firox/settings.conf"):
+            text = read(path)
+            if not text:
+                continue
+            section = ""
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("["):
+                    section = line
+                elif section == "[Desktop]" and "=" in line:
+                    k, v = line.split("=", 1)
+                    conf[k] = v
+            break
+        return conf.get("Wallpaper", ""), conf.get("WallpaperMode", "zoom"), conf.get("BgColor", "#3a3c3f")
+
+    def strip(self, width, height, mon_w, mon_h):
+        """A cairo surface (width x height) for the bar at the bottom of a
+        mon_w x mon_h monitor, or None (no wallpaper: plain CSS look)."""
+        if not self.enabled or width <= 0 or height <= 0:
+            return None
+        path, mode, color = self.desktop()
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            return None
+        key = (path, mtime, mode, color, width, height, mon_w, mon_h)
+        if key not in self.cache:
+            self.cache.clear()
+            try:
+                self.cache[key] = self._render(path, mode, color, width, height, mon_w, mon_h)
+            except (GLib.Error, ValueError, MemoryError) as err:
+                print(f"firox-panel: glass: {err}", file=sys.stderr)
+                self.cache[key] = None
+        return self.cache[key]
+
+    def _render(self, path, mode, color, width, height, mon_w, mon_h):
+        import cairo
+        band_h = height + self.PAD
+        band = cairo.ImageSurface(cairo.FORMAT_RGB24, width, band_h)
+        cr = cairo.Context(band)
+        rgba = Gdk.RGBA()
+        if not rgba.parse(color):
+            rgba.parse("#3a3c3f")
+        cr.set_source_rgb(rgba.red, rgba.green, rgba.blue)
+        cr.paint()
+        top = mon_h - band_h                  # the band's row on the monitor
+        _fmt, pw, ph = GdkPixbuf.Pixbuf.get_file_info(path)
+        if not pw or not ph:
+            raise ValueError(f"can't read {path}")
+        sx = width / mon_w                    # bar width may differ from the monitor's
+        if mode == "stretch":
+            w, h = mon_w, mon_h
+        elif mode == "fit":
+            k = min(mon_w / pw, mon_h / ph)
+            w, h = pw * k, ph * k
+        elif mode in ("center", "tile"):
+            w, h = pw, ph
+        else:                                 # zoom (cover)
+            k = max(mon_w / pw, mon_h / ph)
+            w, h = pw * k, ph * k
+        w, h = max(1, round(w)), max(1, round(h))
+        pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, w, h, False)
+        if mode == "tile":
+            for x0 in range(0, mon_w, w):
+                for y0 in range(0, mon_h, h):
+                    if y0 + h > top:
+                        Gdk.cairo_set_source_pixbuf(cr, pix, x0 * sx, y0 - top)
+                        cr.paint()
+        else:
+            cr.save()
+            cr.scale(sx, 1)
+            Gdk.cairo_set_source_pixbuf(cr, pix, (mon_w - w) / 2, (mon_h - h) / 2 - top)
+            cr.paint()
+            cr.restore()
+
+        blurred = self._blur(band, width, band_h)
+
+        out = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+        cr = cairo.Context(out)
+        cr.set_source_surface(blurred, 0, -self.PAD)
+        cr.paint()
+        # Lens edges: the glass bends light at its rims, so the strip just
+        # inside each edge shows the background slightly magnified
+        for edge_y, origin in ((0, 0), (height, height)):
+            depth = min(9, height / 3)
+            grad = cairo.LinearGradient(0, edge_y, 0, edge_y + (depth if origin == 0 else -depth))
+            grad.add_color_stop_rgba(0, 0, 0, 0, 0.9)
+            grad.add_color_stop_rgba(1, 0, 0, 0, 0)
+            cr.save()
+            cr.translate(0, origin)
+            cr.scale(1, 1.6)
+            cr.translate(0, -origin)
+            cr.set_source_surface(blurred, 0, -self.PAD)
+            cr.restore()
+            cr.mask(grad)
+        return out
+
+    @staticmethod
+    def _blur(src, width, height):
+        """A wide, smooth blur: shrink a lot, then scale back up, twice."""
+        import cairo
+        cur = src
+        for factor in (10, 4):
+            sw, sh = max(1, width // factor), max(1, height // factor)
+            small = cairo.ImageSurface(cairo.FORMAT_RGB24, sw, sh)
+            c = cairo.Context(small)
+            c.scale(sw / width, sh / height)
+            c.set_source_surface(cur, 0, 0)
+            c.get_source().set_filter(cairo.FILTER_GOOD)
+            c.get_source().set_extend(cairo.EXTEND_PAD)
+            c.paint()
+            big = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+            c = cairo.Context(big)
+            c.scale(width / sw, height / sh)
+            c.set_source_surface(small, 0, 0)
+            c.get_source().set_filter(cairo.FILTER_BILINEAR)
+            c.get_source().set_extend(cairo.EXTEND_PAD)
+            c.paint()
+            cur = big
+        return cur
+
+
 def load_settings():
     out = dict(SETTING_DEFAULTS)
     for line in read(SETTINGS).splitlines():
@@ -1386,6 +1557,20 @@ class Clock(Indicator):
 # -------------------------------------------------------------------- bar --
 
 class Bar(Gtk.Window):
+    def on_draw_glass(self, _w, cr):
+        """Glass look: the blurred wallpaper strip first; the CSS frost,
+        rims and buttons are drawn over it."""
+        glass = self.panel.glass
+        if glass is None or not glass.enabled:
+            return False
+        alloc = self.get_allocation()
+        geo = self.monitor.get_geometry()
+        surf = glass.strip(alloc.width, alloc.height, geo.width, geo.height)
+        if surf is not None:
+            cr.set_source_surface(surf, 0, 0)
+            cr.paint()
+        return False
+
     def __init__(self, panel, monitor):
         super().__init__()
         self.panel = panel
@@ -1401,6 +1586,7 @@ class Bar(Gtk.Window):
             GtkLayerShell.set_anchor(self, edge, True)
         GtkLayerShell.auto_exclusive_zone_enable(self)
         self.set_size_request(-1, HEIGHT)
+        self.connect("draw", self.on_draw_glass)
 
         catcher = Gtk.EventBox()          # right-click on an empty part
         catcher.connect("button-press-event", self.on_empty_press)
@@ -1633,6 +1819,9 @@ class Panel:
         self.indicators = [Awake(), Network(), Bluetooth(), Volume(), Battery(), Updates(), Bell(),
                            self.clock]
 
+        self.glass = None
+        self.glass = GlassBackdrop(lambda: [b.queue_draw() for b in self.bars.values()])
+
         self.provider = Gtk.CssProvider()
         self.user_provider = Gtk.CssProvider()
         screen = Gdk.Screen.get_default()
@@ -1653,6 +1842,8 @@ class Panel:
         self.refresh()
 
     def load_css(self):
+        if getattr(self, "glass", None) is not None:
+            self.glass.reset()
         try:
             self.provider.load_from_path(theme_css())
         except GLib.Error as err:

@@ -2,7 +2,7 @@
 
 A desktop Linux built on [Universal Blue](https://universal-blue.org/) (Fedora Atomic): image-based, self-updating, with a familiar classic desktop layout. It includes:
 
-- **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **firox** button, a two-column Start menu, Quick Launch, notification area, desktop icons and Settings (an XP-style Control Panel). It comes in two looks: **Modern** (grey and translucent, with dark apps; the default) and **Classic** (blue "Luna"-style with a green start button).
+- **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **firox** button, a two-column Start menu, Quick Launch, notification area, desktop icons and Settings (an XP-style Control Panel). It comes in three looks: **Modern** (grey and translucent, with dark apps; the default), **Classic** (blue "Luna"-style with a green start button) and **Glass** (frosted glass with bright edges over a colourful wallpaper).
 - **Web apps as first-class apps** with Firefox + [PWAsForFirefox](https://pwasforfirefox.filips.si/) (`firefoxpwa`): install any site as a desktop app with its own window, taskbar button and Start menu entry.
 - **Android apps** with [Waydroid](https://waydro.id/), integrated into the Start menu.
 
@@ -16,9 +16,9 @@ Everything (themes, icons, wallpaper, the Start menu) is original work. No Micro
 |---|---|---|
 | ![Desktop](docs/screenshots/desktop.png) | ![All Programs](docs/screenshots/all-programs.png) | ![Log Off dialog](docs/screenshots/log-off.png) |
 
-### Classic or Modern
+### Classic, Modern or Glass
 
-Same layout, two looks. **Modern** (the default) is grey, flat and translucent, with dark-mode apps. **Classic** is the blue and green one above:
+Same layout, three looks. **Modern** (the default) is grey, flat and translucent, with dark-mode apps. **Classic** is the blue and green one above:
 
 | Modern Start menu | Modern Turn Off dialog |
 |---|---|
@@ -34,9 +34,13 @@ The login screen shows everyone's account picture and matches the default look:
 |---|---|
 | ![Modern login screen](docs/screenshots/login-modern.png) | ![Classic login screen](docs/screenshots/login-classic.png) |
 
+**Glass** turns the taskbar, Start menu, pop-ups and window title bars into frosted glass: light, translucent, with bright rims, round glass window buttons and an original indigo-to-rose wallpaper ("Glass"). It's inspired by the [liquidglass](https://github.com/bergice/liquidglass) WebGL demo (MIT), which refracts and blurs a background image inside a rounded glass shape. Wayland desktops like this one can't blur what's behind a window, but nothing ever goes behind the taskbar except the wallpaper, so `firox-panel` paints that strip of wallpaper itself, blurred and slightly magnified at the top and bottom edges like the demo's lens, and the theme's frost and rims go on top. The Start menu and pop-ups are translucent sheets with the same rims. Apps stay light.
+
+![Glass look](docs/screenshots/glass.png)
+
 Want Modern with light apps, or Classic with dark ones? The Appearance window also has a **Programs** setting: **Match the look** (the default), **Light** or **Dark**. Light or Dark keeps apps that way whichever look you choose. From a terminal: `ujust dark-mode on|off|auto` (or `firox-theme apps dark|light|auto`).
 
-Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `ujust theme classic` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
+Switch looks in **Settings → Appearance**, or with `ujust theme modern` / `ujust theme classic` / `ujust theme glass` (`firox-theme set NAME` does the same). The change applies to the running desktop immediately and is saved per user. The wallpaper switches too, unless you've picked your own. The default for users who haven't picked one is set in `/etc/firox/theme` (`modern`); change it to `classic` to make the XP look the default. On their first login, users get the default theme's wallpaper and light or dark app style.
 
 <sub>Screenshots are from the built image running headless (`labwc` + `grim`).</sub>
 
@@ -232,7 +236,7 @@ It shows up in **Settings → Screen Saver** straight away. It runs full screen 
 
 ### Everything else
 
-Each look's styling lives in `/usr/share/firox/themes/{classic,modern}/` (taskbar CSS, Start menu CSS, notifications, clipboard picker, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern}`. To add a third look, copy one of those folders and edit it; it shows up in Settings → Appearance automatically. System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
+Each look's styling lives in `/usr/share/firox/themes/{classic,modern,glass}/` (taskbar CSS, Start menu CSS, notifications, clipboard picker, lock screen), with window themes in `/usr/share/themes/Firox-{Luna,Modern,Glass}`. To add another look, copy one of those folders and edit it; it shows up in Settings → Appearance automatically (`GLASS=1` in its `theme.conf` gives it the frosted-wallpaper taskbar). System defaults live in `/etc/xdg/{labwc,waybar,mako,foot,fuzzel}`. Anything you put in the matching `~/.config/` folder overrides them. The Start menu's pinned and default apps are at the top of `system_files/usr/bin/firox-startmenu` (`PINNED`, `DEFAULT_MFU`). The menu also takes `--all-programs`, `--power` and `--log-off`, which you can bind to keys in `rc.xml`.
 
 ## Building and signing
 
