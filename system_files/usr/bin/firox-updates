@@ -12,7 +12,9 @@ policy "stage"); they take effect at the next restart. This shows that:
     firox-updates whatsnew    what changes in the waiting update (or, if none
                               is waiting, what changed in the last update)
     firox-updates login       at login: "Firox Linux was updated" once after
-                              an update was applied
+                              an update was applied; and, once, a hint to run
+                              `ujust install-nvidia` if the computer has a
+                              supported NVIDIA card but runs the standard image
     firox-updates check       print the update state
 """
 
@@ -24,6 +26,7 @@ import sys
 STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "firox")
 NOTIFIED = os.path.join(STATE, "update-notified")      # checksum of the staged update we told about
 LAST_BOOTED = os.path.join(STATE, "last-booted-version")
+NVIDIA_HINT = os.path.join(STATE, "nvidia-hint")        # image we suggested the NVIDIA one for
 ICON = ""   # Font Awesome "arrows-rotate"
 
 
@@ -177,12 +180,41 @@ def login():
     booted, _pending, previous = state()
     if booted is None:
         return
+    nvidia_hint(booted)
     now = version(booted)
     last = read(LAST_BOOTED)
     write(LAST_BOOTED, now)
     if last and last != now:
         notify("Firox Linux was updated", f"You're now on {now}. Click to see what's new.",
                "What's new", [sys.argv[0], "whatsnew"])
+
+
+def nvidia_hint(booted):
+    """A supported NVIDIA card on the standard image: suggest the NVIDIA one
+    (e.g. after being switched to the standard image by mistake). Once per image."""
+    ref = booted.get("container-image-reference") or ""
+    if not ref or "nvidia" in ref or read(NVIDIA_HINT) == ref:
+        return
+    r = run(["lspci", "-nn"])
+    if r is None:
+        return
+    import re
+    cards = [ln for ln in r.stdout.splitlines()
+             if re.search(r"(VGA compatible|3D|Display) controller.*NVIDIA", ln, re.I)]
+    # Kepler..Volta (GK/GM/GP/GV) aren't supported by NVIDIA's open driver
+    if not cards or all(re.search(r"G(K|M|P|V)\d{3}", ln) for ln in cards):
+        return
+    write(NVIDIA_HINT, ref)
+    detached([sys.argv[0], "_nvidia-hint"])    # waits for a click: don't hold up login
+
+
+def nvidia_notify():
+    notify("Your NVIDIA graphics card isn't using NVIDIA's driver",
+           "This computer runs the standard Firox image. Switch to the NVIDIA image for full "
+           "graphics speed: click here, or run ujust install-nvidia.",
+           "Switch to the NVIDIA image",
+           ["xfce4-terminal", "--disable-server", "-T", "NVIDIA driver", "-x", "sh", "-c",
+            "ujust install-nvidia; echo; read -r -p 'Press Enter to close' _"])
 
 
 def main(argv):
@@ -194,6 +226,8 @@ def main(argv):
                f"Firox Linux {argv[2] if len(argv) > 2 else ''} is ready. "
                "Restart when it suits you; click to restart now.".replace("  ", " "),
                "Restart now", [argv[0], "restart"])
+    elif cmd == "_nvidia-hint":
+        nvidia_notify()
     elif cmd == "restart":
         restart()
     elif cmd == "whatsnew":

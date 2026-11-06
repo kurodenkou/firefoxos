@@ -161,7 +161,8 @@ There's a second image, **`ghcr.io/kurodenkou/firox-nvidia-open`**, with NVIDIA'
 
 - **On an installed system:** run `ujust install-nvidia`. It checks your card, switches to the NVIDIA image and keeps your files and settings. `ujust remove-nvidia` switches back.
 - **Secure Boot:** run `ujust enroll-secure-boot-key` before restarting, then choose **Enroll MOK** at the next boot (password `universalblue`).
-- **Fresh install:** build the ISO from the NVIDIA image: `just build-nvidia`, then `just build-iso localhost/firox-nvidia-open`.
+- **Fresh install:** build the ISO from the NVIDIA image: `just build-nvidia`, then `just build-iso localhost/firox-nvidia-open`. The installed system then updates from the NVIDIA image: each image records its own update address in `/usr/share/firox/image-ref`, and the installer points updates there. (ISOs built before this fix pointed every install at the standard image, so the first update dropped the NVIDIA driver; `ujust install-nvidia` switches back.)
+- **Safety net:** if the computer has a supported NVIDIA card but runs the standard image, a notification at login (once) offers to switch.
 - **Waydroid** uses software rendering on NVIDIA (`ujust setup-waydroid` configures that automatically). NVIDIA's driver doesn't support Waydroid's GPU path.
 
 ### Try it in a VM
