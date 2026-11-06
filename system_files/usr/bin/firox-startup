@@ -13,8 +13,10 @@ Your programs are ordinary autostart entries in ~/.config/autostart/
 show up here too. Unticking one keeps it in the list but stops it starting
 (X-GNOME-Autostart-enabled=false); Remove deletes the entry.
 
-Firox's own optional items (the network and Bluetooth icons, Desktop
-Gadgets) are listed as well; they're kept in ~/.config/firox/startup.conf.
+Firox's own optional items (Desktop Gadgets, and the classic nm-applet and
+Blueman tray icons, off by default now that the taskbar has its own network
+and Bluetooth icons; turn them on for VPN password prompts or Blueman's
+file sharing) are listed as well; they're kept in ~/.config/firox/startup.conf.
 System entries in /etc/xdg/autostart aren't started: Firox starts what it
 needs itself.
 """
@@ -50,8 +52,8 @@ SKIP = {"blueman.desktop", "nm-applet.desktop", "polkit-mate-authentication-agen
 
 # Firox's own optional startup items: key, name, icon, command shown
 BUILTIN = [
-    ("network", "Network icon", "network-wireless", "nm-applet --indicator"),
-    ("bluetooth", "Bluetooth icon", "bluetooth", "blueman-applet"),
+    ("network", "Classic network icon (nm-applet)", "network-wireless", "nm-applet --indicator"),
+    ("bluetooth", "Classic Bluetooth icon (Blueman)", "bluetooth", "blueman-applet"),
     ("gadgets", "Desktop Gadgets", "view-grid", "firox-gadgets start"),
 ]
 
@@ -80,10 +82,20 @@ def gadgets_on():
         return True
 
 
+# Off unless turned on: the taskbar has its own network and Bluetooth icons
+TIPS = {
+    "network": "The taskbar has its own network icon. Turn this on if you need nm-applet, "
+               "e.g. for VPNs that ask for a password each time",
+    "bluetooth": "The taskbar has its own Bluetooth icon. Turn this on for Blueman's tray "
+                 "icon, e.g. to receive files",
+}
+BUILTIN_DEFAULT = {"network": "0", "bluetooth": "0"}
+
+
 def builtin_on(key):
     if key == "gadgets":
         return gadgets_on()
-    return read_conf().get(key, "1") != "0"
+    return read_conf().get(key, BUILTIN_DEFAULT.get(key, "1")) != "0"
 
 
 def set_builtin(key, on):
@@ -440,7 +452,7 @@ class StartupWindow(Gtk.ApplicationWindow):
         for key, title, icon, command in BUILTIN:
             self.store.append([builtin_on(key), icon,
                                f"{title}  <small>(Firox)</small>", command, "builtin", key,
-                               True, "Part of Firox; untick it if you don't use it"])
+                               True, TIPS.get(key, "Part of Firox; untick it if you don't use it")])
         self.update()
 
     def update(self):

@@ -147,6 +147,9 @@ button.quick-launch:active {
 #idle_inhibitor.activated { color: #fff6a8; }
 #battery.warning { color: #ffe680; }
 #battery.critical { color: #ff8080; }
+#network, #bluetooth { padding: 0 4px; }
+#network.connecting { color: #fff6a8; }
+#bluetooth.off { color: rgba(255, 255, 255, 0.6); }
 #clock {
     padding: 0 12px 0 8px;
 }

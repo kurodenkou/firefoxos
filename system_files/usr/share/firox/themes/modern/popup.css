@@ -1,0 +1,57 @@
+/* Wi-Fi and Bluetooth pop-ups (firox-network, firox-bluetooth), Modern look */
+window { background-color: transparent; }
+
+#panel {
+    font-family: "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 12px;
+    color: #e8e8e8;
+    margin: 0 6px 6px 0;
+    min-width: 300px;
+    background-color: rgba(36, 36, 36, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+#panel-header { padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+#panel-header .title { color: #f2f2f2; font-size: 13px; font-weight: bold; }
+#body { padding: 8px 10px; }
+#body label { color: #e8e8e8; }
+#body .section { color: #f2f2f2; font-weight: bold; margin: 4px 4px 0 4px; }
+#body .dim { color: #a8a8a8; }
+#body .message { padding: 4px 6px; background-color: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+#body .message.error { background-color: rgba(224, 128, 128, 0.18); color: #f0b0b0; }
+
+.row { border-radius: 6px; }
+.row-top { padding: 5px 6px; }
+.row:hover { background-color: rgba(255, 255, 255, 0.07); }
+.row.expanded { background-color: rgba(255, 255, 255, 0.10); }
+.row image { color: #e8e8e8; }
+.row .badge { color: #a8a8a8; }
+.row-actions { padding: 0 6px 6px 38px; }
+
+#body button {
+    padding: 3px 12px;
+    background-image: none;
+    background-color: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    box-shadow: none;
+    color: #e8e8e8;
+}
+#body button:hover { background-color: rgba(255, 255, 255, 0.18); }
+#body button.suggested-action { background-color: #d0d0d0; border-color: #d0d0d0; }
+#body button.suggested-action label { color: #202020; }
+#body button label { color: #e8e8e8; }
+#body entry { background-color: rgba(0, 0, 0, 0.35); color: #f2f2f2; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 4px; }
+#body checkbutton label { color: #e8e8e8; }
+
+#panel-header switch { background-color: rgba(255, 255, 255, 0.15); border: none; }
+#panel-header switch:checked { background-color: #e0e0e0; }
+#panel-header switch:checked slider { background-color: #2a2a2a; }
+#panel-header switch slider { background-color: #f2f2f2; border: none; }
+
+#panel-footer { padding: 4px 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+#panel-footer button.link { background: transparent; background-image: none; border: none; box-shadow: none; padding: 2px 6px; }
+#panel-footer button.link label { color: #d0d0d0; }
+#panel-footer button.link:hover { background-color: rgba(255, 255, 255, 0.10); border-radius: 4px; }
+scrolledwindow, viewport { background: transparent; border: none; }
