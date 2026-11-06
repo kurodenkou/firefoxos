@@ -32,20 +32,11 @@ case "$verb" in
     search)     exec pcmanfm-qt --find-files "$HOME" ;;
 
     # --- Run... ---------------------------------------------------------
-    run)
-        mapfile -t cfg < <(themed --config fuzzel/fuzzel.ini fuzzel.ini)
-        cmd="$(fuzzel "${cfg[@]}" --prompt-only 'Open: ' --width 50 \
-                --placeholder 'Type a program, folder, file or web address' </dev/null)" || exit 0
-        [ -z "$cmd" ] && exit 0
-        case "$cmd" in
-            http://*|https://*|www.*|*.com|*.org|*.net) exec firefox "$cmd" ;;
-            /*|~*) exec xdg-open "${cmd/#\~/$HOME}" ;;
-            *) exec sh -c "$cmd" ;;
-        esac
-        ;;
+    run)        exec firox-run ;;
 
     # --- apps / system --------------------------------------------------
     task-manager) exec firox-taskmgr ;;
+    startup)    exec firox-startup ;;
     help)       exec firefox "file:///usr/share/firox/help/index.html" ;;
     printers)   exec system-config-printer ;;
     software)

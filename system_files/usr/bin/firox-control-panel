@@ -44,6 +44,7 @@ APPLETS = [
     ("input-keyboard", "Keyboard", "Layouts, repeat speed and Num Lock", ["@keyboard"]),
     ("preferences-desktop-theme", "Appearance", "Classic or Modern look, light or dark apps", ["@appearance"]),
     ("preferences-desktop", "Taskbar", "Auto-hide, Quick Launch, grouping and the clock", ["@taskbar"]),
+    ("system-run", "Startup Programs", "Choose what starts when you log in", ["firox-startup"]),
     ("preferences-desktop-default-applications", "Default Programs",
      "Web browser, email, music, pictures and more", ["@defaults"]),
     ("preferences-desktop-wallpaper", "Desktop Background", "Wallpaper and desktop icons",
@@ -1363,7 +1364,7 @@ class App(Gtk.Application):
                   "screensaver": ["@screensaver"], "clipboard": ["@clipboard"],
                   "mouse": ["@mouse"], "keyboard": ["@keyboard"],
                   "taskbar": ["@taskbar"], "defaults": ["@defaults"],
-                  "display": ["firox-display"]}
+                  "display": ["firox-display"], "startup": ["firox-startup"]}
         if page in direct and self.win is None:
             # Open just the applet, without the panel window
             if direct[page][0].startswith("@"):

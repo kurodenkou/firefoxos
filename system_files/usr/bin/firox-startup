@@ -1,0 +1,517 @@
+#!/usr/bin/python3
+"""
+firox-startup: Startup Programs. Choose which programs start when you log in.
+
+    firox-startup            the Startup Programs window (Settings)
+    firox-startup run        start them (the session does this at login)
+    firox-startup list       what starts, and whether it's on
+    firox-startup want KEY   exit 0 if Firox's own item KEY is on
+                             (network, bluetooth; used by the autostart file)
+
+Your programs are ordinary autostart entries in ~/.config/autostart/
+(the freedesktop.org standard), so apps that offer "start when I log in"
+show up here too. Unticking one keeps it in the list but stops it starting
+(X-GNOME-Autostart-enabled=false); Remove deletes the entry.
+
+Firox's own optional items (the network and Bluetooth icons, Desktop
+Gadgets) are listed as well; they're kept in ~/.config/firox/startup.conf.
+System entries in /etc/xdg/autostart aren't started: Firox starts what it
+needs itself.
+"""
+
+import os
+import subprocess
+import sys
+import time
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+try:   # newer GLib moved DesktopAppInfo to GioUnix
+    gi.require_version("GioUnix", "2.0")
+    from gi.repository import GioUnix  # noqa: E402
+    DesktopAppInfo = GioUnix.DesktopAppInfo
+except (ValueError, ImportError):
+    DesktopAppInfo = Gio.DesktopAppInfo
+
+AUTOSTART = os.path.join(GLib.get_user_config_dir(), "autostart")
+CONF = os.path.join(GLib.get_user_config_dir(), "firox", "startup.conf")
+GADGETS_CONF = os.path.join(GLib.get_user_config_dir(), "firox", "gadgets.conf")
+LOG = os.path.join(GLib.get_user_state_dir(), "firox", "startup.log")
+GROUP = "Desktop Entry"
+
+# Entries Firox already starts itself (or that are for other desktops):
+# a copy of one of these in ~/.config/autostart would start it twice
+SKIP = {"blueman.desktop", "nm-applet.desktop", "polkit-mate-authentication-agent-1.desktop",
+        "xdg-user-dirs.desktop", "lxqt-desktop.desktop", "pcmanfm-qt.desktop",
+        "mako.desktop", "waybar.desktop"}
+
+# Firox's own optional startup items: key, name, icon, command shown
+BUILTIN = [
+    ("network", "Network icon", "network-wireless", "nm-applet --indicator"),
+    ("bluetooth", "Bluetooth icon", "bluetooth", "blueman-applet"),
+    ("gadgets", "Desktop Gadgets", "view-grid", "firox-gadgets start"),
+]
+
+
+# --- Firox's own items -----------------------------------------------------------
+
+def read_conf():
+    conf = {}
+    try:
+        with open(CONF) as fh:
+            for line in fh:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    conf[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return conf
+
+
+def gadgets_on():
+    try:
+        with open(GADGETS_CONF) as fh:
+            return not any(line.strip() == "ENABLED=0" for line in fh)
+    except OSError:
+        return True
+
+
+def builtin_on(key):
+    if key == "gadgets":
+        return gadgets_on()
+    return read_conf().get(key, "1") != "0"
+
+
+def set_builtin(key, on):
+    if key == "gadgets":
+        subprocess.run(["firox-gadgets", "on" if on else "off"])
+        return
+    conf = read_conf()
+    conf[key] = "1" if on else "0"
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    tmp = CONF + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("# Firox items that start at login (Settings > Startup Programs)\n")
+        for k, v in conf.items():
+            fh.write(f"{k}={v}\n")
+    os.replace(tmp, CONF)
+
+
+# --- autostart entries -------------------------------------------------------------
+
+def load(path):
+    kf = GLib.KeyFile()
+    try:
+        kf.load_from_file(path, GLib.KeyFileFlags.KEEP_COMMENTS | GLib.KeyFileFlags.KEEP_TRANSLATIONS)
+    except GLib.Error:
+        return None
+    return kf
+
+
+def get(kf, key, default=""):
+    try:
+        return kf.get_locale_string(GROUP, key, None)
+    except GLib.Error:
+        return default
+
+
+def get_bool(kf, key, default):
+    try:
+        return kf.get_boolean(GROUP, key)
+    except GLib.Error:
+        return default
+
+
+class Entry:
+    def __init__(self, path, kf):
+        self.path = path
+        self.file = os.path.basename(path)
+        self.kf = kf
+        self.name = get(kf, "Name") or self.file.removesuffix(".desktop")
+        self.icon = get(kf, "Icon") or "application-x-executable"
+        # Exec without its %U / %f placeholders, for showing
+        self.command = " ".join(w for w in get(kf, "Exec").split()
+                                if not (len(w) == 2 and w[0] == "%"))
+        self.comment = get(kf, "Comment")
+
+    @property
+    def enabled(self):
+        return not get_bool(self.kf, "Hidden", False) and \
+            get_bool(self.kf, "X-GNOME-Autostart-enabled", True)
+
+    def set_enabled(self, on):
+        self.kf.set_boolean(GROUP, "X-GNOME-Autostart-enabled", on)
+        if get_bool(self.kf, "Hidden", False):
+            self.kf.set_boolean(GROUP, "Hidden", False)
+        save(self.kf, self.path)
+
+    def runnable(self):
+        """Why it won't start here, or None."""
+        if self.file in SKIP:
+            return "Firox starts this itself"
+        info = DesktopAppInfo.new_from_filename(self.path)
+        if info is None:
+            return "not installed"
+        if not info.get_show_in(None):
+            return "only for other desktops"
+        return None
+
+
+def entries():
+    out = []
+    try:
+        names = sorted(os.listdir(AUTOSTART))
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".desktop"):
+            continue
+        path = os.path.join(AUTOSTART, name)
+        kf = load(path)
+        if kf is not None and get(kf, "Type", "Application") == "Application":
+            out.append(Entry(path, kf))
+    return out
+
+
+def save(kf, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    kf.save_to_file(tmp)
+    os.replace(tmp, path)
+
+
+def unique_path(base):
+    base = "".join(c if c.isalnum() or c in "-_." else "-" for c in base) or "program"
+    path = os.path.join(AUTOSTART, base + ".desktop")
+    n = 2
+    while os.path.exists(path):
+        path = os.path.join(AUTOSTART, f"{base}-{n}.desktop")
+        n += 1
+    return path
+
+
+def add_app(info):
+    """Start INFO (a DesktopAppInfo) at login: copy its desktop file."""
+    kf = load(info.get_filename()) or GLib.KeyFile()
+    for key in ("Hidden", "NoDisplay", "OnlyShowIn", "NotShowIn", "Actions", "DBusActivatable"):
+        try:
+            kf.remove_key(GROUP, key)
+        except GLib.Error:
+            pass
+    kf.set_boolean(GROUP, "X-GNOME-Autostart-enabled", True)
+    app_id = (info.get_id() or info.get_name()).removesuffix(".desktop")
+    path = os.path.join(AUTOSTART, app_id + ".desktop")
+    if os.path.exists(path):
+        old = load(path)
+        if old is not None and get(old, "Exec") == get(kf, "Exec"):
+            Entry(path, old).set_enabled(True)
+            return path
+        path = unique_path(app_id)
+    save(kf, path)
+    return path
+
+
+def add_command(name, command):
+    kf = GLib.KeyFile()
+    kf.set_string(GROUP, "Type", "Application")
+    kf.set_string(GROUP, "Name", name)
+    kf.set_string(GROUP, "Exec", command)
+    kf.set_string(GROUP, "Icon", "system-run")
+    kf.set_boolean(GROUP, "X-GNOME-Autostart-enabled", True)
+    path = unique_path(name.lower().replace(" ", "-"))
+    save(kf, path)
+    return path
+
+
+# --- at login ---------------------------------------------------------------------
+
+def log(msg):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def run_all():
+    try:
+        os.remove(LOG)
+    except OSError:
+        pass
+    pending = []
+    for e in entries():
+        if not e.enabled:
+            log(f"{e.file}: off")
+            continue
+        why = e.runnable()
+        if why:
+            log(f"{e.file}: not started ({why})")
+            continue
+        try:
+            delay = max(0, int(get(e.kf, "X-GNOME-Autostart-Delay", "0") or 0))
+        except ValueError:
+            delay = 0
+        pending.append((delay, e))
+    pending.sort(key=lambda p: p[0])
+    waited = 0
+    for delay, e in pending:
+        if delay > waited:
+            time.sleep(delay - waited)
+            waited = delay
+        info = DesktopAppInfo.new_from_filename(e.path)
+        try:
+            info.launch([], None)
+            log(f"{e.file}: started ({e.command})")
+        except GLib.Error as err:
+            log(f"{e.file}: failed: {err.message}")
+    return 0
+
+
+# --- window ------------------------------------------------------------------------
+
+class AddDialog(Gtk.Dialog):
+    """Pick a program from the Start menu, or type a command."""
+
+    def __init__(self, parent):
+        super().__init__(title="Add a Startup Program", transient_for=parent, modal=True)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.ok = self.add_button("Add", Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.set_default_size(420, 480)
+        box = self.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+
+        self.search = Gtk.SearchEntry(placeholder_text="Search programs")
+        self.search.connect("search-changed", lambda _e: self.filter.refilter())
+        box.pack_start(self.search, False, False, 0)
+
+        self.store = Gtk.ListStore(str, str, object)   # icon, name, info
+        apps = [a for a in Gio.AppInfo.get_all()
+                if isinstance(a, DesktopAppInfo) and a.should_show() and a.get_filename()]
+        for a in sorted(apps, key=lambda a: a.get_name().lower()):
+            icon = a.get_icon()
+            self.store.append([icon.to_string() if icon else "application-x-executable",
+                               a.get_name(), a])
+        self.filter = self.store.filter_new()
+        self.filter.set_visible_func(self.visible)
+        self.view = Gtk.TreeView(model=self.filter, headers_visible=False)
+        col = Gtk.TreeViewColumn()
+        pix = Gtk.CellRendererPixbuf(stock_size=Gtk.IconSize.LARGE_TOOLBAR)
+        col.pack_start(pix, False)
+        col.add_attribute(pix, "icon-name", 0)
+        txt = Gtk.CellRendererText()
+        col.pack_start(txt, True)
+        col.add_attribute(txt, "text", 1)
+        self.view.append_column(col)
+        self.view.connect("row-activated", lambda *_: self.response(Gtk.ResponseType.OK))
+        self.view.get_selection().connect("changed", lambda _s: self.update())
+        sc = Gtk.ScrolledWindow(shadow_type=Gtk.ShadowType.IN)
+        sc.add(self.view)
+        box.pack_start(sc, True, True, 0)
+
+        self.custom = Gtk.Expander(label="Or type a command")
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6, margin_top=6)
+        self.name = Gtk.Entry(placeholder_text="My script", hexpand=True)
+        self.command = Gtk.Entry(placeholder_text="~/bin/my-script --quiet", hexpand=True)
+        browse = Gtk.Button(label="Browse...")
+        browse.connect("clicked", self.on_browse)
+        grid.attach(Gtk.Label(label="Name:", xalign=0), 0, 0, 1, 1)
+        grid.attach(self.name, 1, 0, 2, 1)
+        grid.attach(Gtk.Label(label="Command:", xalign=0), 0, 1, 1, 1)
+        grid.attach(self.command, 1, 1, 1, 1)
+        grid.attach(browse, 2, 1, 1, 1)
+        self.custom.add(grid)
+        self.custom.connect("notify::expanded", lambda *_: self.update())
+        for e in (self.name, self.command):
+            e.connect("changed", lambda _e: self.update())
+            e.set_activates_default(True)
+        box.pack_start(self.custom, False, False, 0)
+        self.update()
+        self.show_all()
+
+    def visible(self, model, it, _data):
+        q = self.search.get_text().strip().lower()
+        if not q:
+            return True
+        info = model[it][2]
+        return q in model[it][1].lower() or q in (info.get_description() or "").lower() or \
+            q in (info.get_executable() or "").lower()
+
+    def on_browse(self, _b):
+        dlg = Gtk.FileChooserNative(title="Choose a program", transient_for=self,
+                                    action=Gtk.FileChooserAction.OPEN, accept_label="Choose")
+        if dlg.run() == Gtk.ResponseType.ACCEPT:
+            path = dlg.get_filename()
+            self.command.set_text(GLib.shell_quote(path) if " " in path else path)
+            if not self.name.get_text():
+                self.name.set_text(os.path.basename(path))
+        dlg.destroy()
+
+    def update(self):
+        if self.custom.get_expanded():
+            self.ok.set_sensitive(bool(self.command.get_text().strip()))
+        else:
+            self.ok.set_sensitive(self.view.get_selection().get_selected()[1] is not None)
+
+    def add(self):
+        if self.custom.get_expanded():
+            cmd = self.command.get_text().strip()
+            name = self.name.get_text().strip() or GLib.shell_parse_argv(cmd)[1][0]
+            return add_command(os.path.basename(name), cmd)
+        model, it = self.view.get_selection().get_selected()
+        return add_app(model[it][2]) if it else None
+
+
+class StartupWindow(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Startup Programs")
+        self.set_default_size(620, 440)
+        self.set_icon_name("system-run")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_border_width(14)
+        self.add(box)
+
+        header = Gtk.Box(spacing=12)
+        header.pack_start(Gtk.Image.new_from_icon_name("system-run", Gtk.IconSize.DIALOG),
+                          False, False, 0)
+        header.pack_start(Gtk.Label(
+            label="Ticked programs start when you log in. Untick one to stop it starting "
+                  "without removing it. Changes take effect the next time you log in.",
+            xalign=0, wrap=True, max_width_chars=60), True, True, 0)
+        box.pack_start(header, False, False, 0)
+
+        # on, icon, name, command, kind ("builtin"/"entry"), key or Entry, sensitive, note
+        self.store = Gtk.ListStore(bool, str, str, str, str, object, bool, str)
+        self.view = Gtk.TreeView(model=self.store)
+        toggle = Gtk.CellRendererToggle()
+        toggle.connect("toggled", self.on_toggled)
+        col = Gtk.TreeViewColumn("", toggle, active=0, activatable=6)
+        self.view.append_column(col)
+        col = Gtk.TreeViewColumn("Program")
+        pix = Gtk.CellRendererPixbuf(stock_size=Gtk.IconSize.LARGE_TOOLBAR)
+        col.pack_start(pix, False)
+        col.add_attribute(pix, "icon-name", 1)
+        txt = Gtk.CellRendererText()
+        col.pack_start(txt, True)
+        col.add_attribute(txt, "markup", 2)
+        col.set_expand(True)
+        self.view.append_column(col)
+        cmd = Gtk.CellRendererText(ellipsize=3)   # Pango.EllipsizeMode.END
+        cmd.set_property("foreground", "#777")
+        col = Gtk.TreeViewColumn("Command", cmd, text=3)
+        col.set_expand(True)
+        self.view.append_column(col)
+        self.view.get_selection().connect("changed", lambda _s: self.update())
+        self.view.set_tooltip_column(7)
+        sc = Gtk.ScrolledWindow(shadow_type=Gtk.ShadowType.IN)
+        sc.add(self.view)
+        box.pack_start(sc, True, True, 0)
+
+        buttons = Gtk.Box(spacing=8)
+        add = Gtk.Button(label="Add...")
+        add.connect("clicked", self.on_add)
+        self.remove = Gtk.Button(label="Remove")
+        self.remove.connect("clicked", self.on_remove)
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda _b: self.close())
+        buttons.pack_start(add, False, False, 0)
+        buttons.pack_start(self.remove, False, False, 0)
+        buttons.pack_end(close, False, False, 0)
+        box.pack_start(buttons, False, False, 0)
+
+        self.reload()
+        self.show_all()
+
+    def reload(self):
+        self.store.clear()
+        for e in entries():
+            why = e.runnable()
+            name = GLib.markup_escape_text(e.name)
+            if why:
+                name += f"  <small>({GLib.markup_escape_text(why)})</small>"
+            self.store.append([e.enabled and not why, e.icon, name, e.command, "entry", e,
+                               why is None, e.comment or e.name])
+        for key, title, icon, command in BUILTIN:
+            self.store.append([builtin_on(key), icon,
+                               f"{title}  <small>(Firox)</small>", command, "builtin", key,
+                               True, "Part of Firox; untick it if you don't use it"])
+        self.update()
+
+    def update(self):
+        _m, it = self.view.get_selection().get_selected()
+        self.remove.set_sensitive(it is not None and self.store[it][4] == "entry")
+
+    def on_toggled(self, _cell, path):
+        row = self.store[path]
+        on = not row[0]
+        if row[4] == "builtin":
+            set_builtin(row[5], on)
+        else:
+            row[5].set_enabled(on)
+        row[0] = on
+
+    def on_add(self, _b):
+        dlg = AddDialog(self)
+        if dlg.run() == Gtk.ResponseType.OK:
+            try:
+                dlg.add()
+            except (GLib.Error, OSError, IndexError) as err:
+                print(f"startup: {err}", file=sys.stderr)
+        dlg.destroy()
+        self.reload()
+
+    def on_remove(self, _b):
+        _m, it = self.view.get_selection().get_selected()
+        if it is None or self.store[it][4] != "entry":
+            return
+        e = self.store[it][5]
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                buttons=Gtk.ButtonsType.YES_NO,
+                                text=f"Stop {e.name} starting when you log in, and remove it from this list?")
+        dlg.format_secondary_text("This doesn't uninstall the program.")
+        if dlg.run() == Gtk.ResponseType.YES:
+            try:
+                os.remove(e.path)
+            except OSError as err:
+                print(f"startup: {err}", file=sys.stderr)
+            self.reload()
+        dlg.destroy()
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.firox.Startup")
+
+    def do_activate(self):
+        win = self.get_active_window() or StartupWindow(self)
+        win.present()
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "run":
+        return run_all()
+    if cmd == "want":
+        return 0 if len(sys.argv) > 2 and builtin_on(sys.argv[2]) else 1
+    if cmd == "list":
+        for e in entries():
+            why = e.runnable()
+            state = "on " if e.enabled else "off"
+            print(f"{state}  {e.file:32} {e.command}" + (f"  ({why})" if why else ""))
+        for key, title, _icon, command in BUILTIN:
+            print(f"{'on ' if builtin_on(key) else 'off'}  firox:{key:26} {command}")
+        return 0
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    return App().run(sys.argv[:1])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Run
+Comment=Open a program, folder, document or web address by typing its name
+Exec=firox-run
+Icon=system-run
+NoDisplay=true
+Categories=System;
+Keywords=run;command;launch;
+StartupNotify=false

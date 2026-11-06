@@ -55,7 +55,7 @@ PACKAGES=(
     wlopm
     mako                         # notifications
     libnotify
-    fuzzel                       # "Run..." dialog
+    fuzzel                       # clipboard history picker (Super+V)
     grim
     slurp
     wl-clipboard

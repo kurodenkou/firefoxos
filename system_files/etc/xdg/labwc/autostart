@@ -39,8 +39,9 @@ else
 fi
 
 # Notification-area (tray) icons
-( sleep 2; nm-applet --indicator ) >/dev/null 2>&1 &
-( sleep 2; blueman-applet ) >/dev/null 2>&1 &
+# (either can be turned off in Settings > Startup Programs)
+( sleep 2; firox-startup want network && exec nm-applet --indicator ) >/dev/null 2>&1 &
+( sleep 2; firox-startup want bluetooth && exec blueman-applet ) >/dev/null 2>&1 &
 
 # Password prompts for admin tasks
 /usr/libexec/polkit-mate-authentication-agent-1 >/dev/null 2>&1 &
@@ -71,6 +72,10 @@ firox-gadgets start >/dev/null 2>&1 &
 
 # "Firox Linux was updated" once after an update was applied
 ( sleep 20; firox-updates login ) >/dev/null 2>&1 &
+
+# Your startup programs (Settings > Startup Programs, ~/.config/autostart),
+# once the taskbar's notification area is up for their icons
+( sleep 4; firox-startup run ) >/dev/null 2>&1 &
 
 # One-time per-user setup (folders, web app runtime, welcome tip)
 firox-user-setup >/dev/null 2>&1 &
