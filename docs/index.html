@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firox Linux</title>
+<meta name="description" content="Firox Linux: a familiar classic desktop on an image-based, self-updating Fedora Atomic system, with web apps and Android apps built in.">
+<meta property="og:title" content="Firox Linux">
+<meta property="og:description" content="Firox Linux: a familiar classic desktop on an image-based, self-updating Fedora Atomic system, with web apps and Android apps built in.">
+<meta property="og:image" content="screenshots/glass.png">
+<link rel="icon" href="assets/firox-orb.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="wrap">
+        <a class="brand" href="index.html"><img src="assets/firox-orb.svg" alt=""><span>firox</span> Linux</a>
+        <nav class="nav" aria-label="Site">
+        <a href="index.html" aria-current="page">Home</a>
+        <a href="looks.html">Looks</a>
+        <a href="features.html">Features</a>
+        <a href="install.html">Install</a>
+        <a href="guide.html">Guide</a>
+        <a href="https://github.com/kurodenkou/firox">GitHub</a>
+        </nav>
+    </div>
+</header>
+<section class="hero">
+    <div class="wrap">
+        <h1>Firox Linux</h1>
+        <p class="lead">A desktop Linux with a familiar classic layout: a taskbar, a two-column Start menu and an XP-style Control Panel. Image-based and self-updating, built on Universal Blue (Fedora Atomic).</p>
+        <div class="buttons">
+            <a class="btn" href="install.html">Install Firox</a>
+            <a class="btn ghost" href="looks.html">See the three looks</a>
+            <a class="btn ghost" href="https://github.com/kurodenkou/firox">Source on GitHub</a>
+        </div>
+        <img class="shot" src="screenshots/glass.png" alt="The Firox desktop in the Glass look: Start menu open over a colourful wallpaper, with a frosted taskbar">
+    </div>
+</section>
+<main>
+<div class="wrap">
+
+<h2>What you get</h2>
+<div class="grid three">
+    <div class="card">
+        <div class="icon">🪟</div>
+        <h3>A classic desktop, rebuilt for Wayland</h3>
+        <p>A taskbar with a <b>firox</b> button, a two-column Start menu, Quick Launch, a notification area, desktop icons and Settings laid out like the XP Control Panel.</p>
+        <p>It comes in three looks: <b>Modern</b>, <b>Classic</b> and <b>Glass</b>.</p>
+    </div>
+    <div class="card">
+        <div class="icon">🌐</div>
+        <h3>Web apps as real apps</h3>
+        <p>Install any website as a desktop app with its own window, taskbar button and Start menu entry. It uses Firefox and <a href="https://pwasforfirefox.filips.si/">PWAsForFirefox</a>.</p>
+    </div>
+    <div class="card">
+        <div class="icon">🤖</div>
+        <h3>Android apps</h3>
+        <p><a href="https://waydro.id/">Waydroid</a> is built in and has its own folder in the Start menu. The first time you open it, it downloads Android for you. A version with the Play Store is available too.</p>
+    </div>
+</div>
+
+<h2>Safe, automatic updates</h2>
+<div class="grid two">
+    <div class="card">
+        <h3>Updates that can't break your computer</h3>
+        <p>Firox is image-based: each update is a complete new version of the system, downloaded in the background and switched to at the next restart.</p>
+        <p>If an update misbehaves, <b>System Restore</b> takes you back to the previous version. Your files, settings and apps aren't touched.</p>
+    </div>
+    <div class="card">
+        <h3>Your files, kept safe</h3>
+        <p><b>Backup and Restore</b> copies your home folder every hour to a USB drive or a network folder. Backups are plain folders you can open on any computer.</p>
+        <p><b>Sync</b> keeps chosen folders the same on all your Firox computers at home. Computers pair with a PIN.</p>
+    </div>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Everything in its familiar place</h3>
+        <p>Click <b>firox</b> for the Start menu.</p>
+        <ul>
+            <li><b>Left column:</b> your pinned and most-used programs, plus <b>All Programs</b> with search.</li>
+            <li><b>Right column:</b> Documents, Pictures, Computer, Settings, Help and Run.</li>
+            <li><b>Bottom:</b> <b>Log Off</b> and <b>Turn Off Computer</b> open the dialogs you'd expect.</li>
+        </ul>
+        <p><a href="features.html">See everything that's included →</a></p>
+    </div>
+    <figure>
+    <img src="screenshots/start-menu.png" alt="The Classic look: blue taskbar, green start button and the two-column Start menu" loading="lazy">
+    <figcaption>The Classic look</figcaption>
+</figure>
+</div>
+
+<div class="note">Firox Linux was called <b>FirefoxOS</b> in its first versions. If you have one of those, <a href="install.html#upgrading-from-firefoxos">switch it to Firox</a> once and it updates normally from then on.</div>
+
+<h2>Try it</h2>
+<p>Already on Fedora Atomic or Universal Blue? Switch to Firox with one command, then restart:</p>
+<div class="code"><pre><code>sudo bootc switch ghcr.io/kurodenkou/firox:latest</code></pre></div>
+<p>For a new computer, a computer with an NVIDIA card, or a virtual machine, see <a href="install.html">Install</a>.</p>
+
+</div>
+</main>
+<footer class="site-footer">
+    <div class="wrap">
+        <span>Firox Linux, built on <a href="https://universal-blue.org/">Universal Blue</a> (Fedora Atomic). Themes, icons, wallpapers and the Start menu are original work; no Microsoft assets are used.</span>
+        <span><a href="https://github.com/kurodenkou/firox">Source on GitHub</a> · <a href="https://github.com/kurodenkou/firox/issues">Report a problem</a></span>
+    </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

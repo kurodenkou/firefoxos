@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide · Firox Linux</title>
+<meta name="description" content="Firox Linux guide: ujust commands, adding screen savers, customising the looks, building and signing images, and known limitations.">
+<meta property="og:title" content="Guide · Firox Linux">
+<meta property="og:description" content="Firox Linux guide: ujust commands, adding screen savers, customising the looks, building and signing images, and known limitations.">
+<meta property="og:image" content="screenshots/glass.png">
+<link rel="icon" href="assets/firox-orb.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="wrap">
+        <a class="brand" href="index.html"><img src="assets/firox-orb.svg" alt=""><span>firox</span> Linux</a>
+        <nav class="nav" aria-label="Site">
+        <a href="index.html">Home</a>
+        <a href="looks.html">Looks</a>
+        <a href="features.html">Features</a>
+        <a href="install.html">Install</a>
+        <a href="guide.html" aria-current="page">Guide</a>
+        <a href="https://github.com/kurodenkou/firox">GitHub</a>
+        </nav>
+    </div>
+</header>
+<section class="hero page-hero">
+    <div class="wrap">
+        <h1>Guide</h1>
+        <p class="lead">Handy commands, customising Firox, and how the images are built.</p>
+    </div>
+</section>
+<main>
+<div class="wrap">
+
+<ul class="toc">
+    <li><a href="#ujust">ujust commands</a></li>
+    <li><a href="#customising">Customising</a></li>
+    <li><a href="#building">Building and signing</a></li>
+    <li><a href="#layout">Repository layout</a></li>
+    <li><a href="#limitations">Known limitations</a></li>
+</ul>
+
+<h2 id="ujust"><code>ujust</code> commands</h2>
+<p>Type these in the Command Prompt. Run <code>ujust</code> on its own to list everything.</p>
+<div class="table-wrap">
+<table>
+    <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+    <tbody>
+        <tr><td><code>ujust setup-waydroid [vanilla|gapps]</code></td><td>Download and set up Android (<code>gapps</code> includes the Play Store)</td></tr>
+        <tr><td><code>ujust waydroid-google-id</code></td><td>Print the Android ID to register a Play Store install</td></tr>
+        <tr><td><code>ujust reset-waydroid</code></td><td>Delete Android and its data</td></tr>
+        <tr><td><code>ujust fix-realtek-audio</code></td><td>Fix silent or crackling Realtek onboard audio (<a href="https://github.com/hello2himel/linux-audio-fix">linux-audio-fix</a>, pinned and checksum-verified; also in Settings → Sound Troubleshooter)</td></tr>
+        <tr><td><code>ujust install-webapp-runtime</code></td><td>(Re)install the Firefox runtime for web apps</td></tr>
+        <tr><td><code>ujust install-app-store</code></td><td>Install the Bazaar app store</td></tr>
+        <tr><td><code>ujust customize-desktop</code></td><td>Copy the desktop's default config into <code>~/.config</code> to edit</td></tr>
+        <tr><td><code>ujust reset-desktop</code></td><td>Back up your changes and restore the defaults</td></tr>
+        <tr><td><code>ujust theme [classic|modern|glass]</code></td><td>Switch the look</td></tr>
+        <tr><td><code>ujust dark-mode [on|off|auto]</code></td><td>Dark or light apps whatever the look (<code>auto</code> follows it)</td></tr>
+        <tr><td><code>ujust screensaver [ID] [MINUTES]</code></td><td>List screen savers, or pick one and how long to wait (<code>none</code> turns them off)</td></tr>
+        <tr><td><code>ujust power-saving [KEY=MINUTES…|reset]</code></td><td>Show or change the monitor-off, lock and sleep times (e.g. <code>MONITOR_AC=10 SLEEP_BATTERY=20</code>; 0 = never)</td></tr>
+        <tr><td><code>ujust install-nvidia / remove-nvidia</code></td><td>Switch to or from the image with NVIDIA drivers</td></tr>
+        <tr><td><code>ujust update</code></td><td>Update Firox, Flatpaks and toolboxes now</td></tr>
+    </tbody>
+</table>
+</div>
+
+<h2 id="customising">Customising</h2>
+<h3 id="screen-savers">Adding screen savers</h3>
+<p>Any program that runs in a terminal can be a screen saver. Create <code>~/.local/share/firox/screensavers/NAME.conf</code> (or put it in <code>/etc/firox/screensavers/</code> for every user):</p>
+<div class="code"><pre><code>NAME=Pipes
+COMMAND=pipes.sh</code></pre></div>
+<p>It shows up in <b>Settings → Screen Saver</b> straight away.</p>
+<ul>
+    <li><b>How it runs:</b> full screen in a black terminal; it stops when you move the mouse or press a key. For a program that opens its own window instead, add <code>TERMINAL=false</code>.</li>
+    <li><b><code>COMMAND</code></b> can be a script you drop in <code>~/.local/bin</code> (handy for single-file savers like <code>pipes.sh</code>) or any program on your <code>PATH</code>.</li>
+    <li><b>Defaults:</b> the built-in savers are in <code>/usr/share/firox/screensavers/</code>, and the default for new users is in <code>/etc/firox/screensaver</code> (<code>none</code>).</li>
+</ul>
+<figure>
+    <img src="screenshots/screensaver-two-monitors.png" alt="A screen saver running on two monitors" loading="lazy">
+    <figcaption>Screen savers run on every monitor</figcaption>
+</figure>
+
+<h3>Looks, the taskbar and the Start menu</h3>
+<ul>
+    <li><b>Looks:</b> each look's styles are in <code>/usr/share/firox/themes/{classic,modern,glass}/</code>: taskbar, Start menu, pop-ups, notifications, clipboard picker and lock screen. Window frames are in <code>/usr/share/themes/Firox-{Luna,Modern,Glass}</code>.</li>
+    <li><b>Your own look:</b> copy one of those folders and edit it; it appears in <b>Settings → Appearance</b> automatically. <code>GLASS=1</code> in its <code>theme.conf</code> gives it the frosted-wallpaper taskbar.</li>
+    <li><b>Taskbar:</b> your own CSS rules go in <code>~/.config/firox/panel.css</code>.</li>
+    <li><b>System defaults:</b> in <code>/etc/xdg/{labwc,waybar,mako,foot,fuzzel}</code>. Anything you put in the matching <code>~/.config/</code> folder overrides them; <code>ujust customize-desktop</code> copies them there for you.</li>
+    <li><b>The Start menu:</b> pinned and default apps are at the top of <code>system_files/usr/bin/firox-startmenu</code> (<code>PINNED</code>, <code>DEFAULT_MFU</code>). It also takes <code>--all-programs</code>, <code>--power</code> and <code>--log-off</code>, which you can bind to keys in labwc's <code>rc.xml</code>.</li>
+</ul>
+
+<h2 id="building">Building and signing</h2>
+<ul>
+    <li><b>What's built:</b> GitHub Actions builds and publishes <code>ghcr.io/&lt;owner&gt;/firox</code> and <code>ghcr.io/&lt;owner&gt;/firox-nvidia-open</code> on every push to <code>main</code> and every day.</li>
+    <li><b>What doesn't trigger a build:</b> changes that only touch Markdown or <code>docs/</code> (this website), and pull requests.</li>
+    <li><b>Disk images:</b> <code>build-disk.yml</code> only runs when started by hand.</li>
+    <li><b>Signing:</b> generate a key pair with <code>cosign generate-key-pair</code> and add the private key as the <code>SIGNING_SECRET</code> repository secret. Without it, images still build and signing is skipped.</li>
+</ul>
+
+<h2 id="layout">Repository layout</h2>
+<div class="code"><pre><code>Containerfile                 FROM ghcr.io/ublue-os/base-main, runs build.sh
+build_files/build.sh          repos, packages, services, branding
+build_files/nvidia.sh         the NVIDIA variant&#x27;s driver
+system_files/                 copied onto / in the image
+  etc/xdg/labwc/              compositor config, keybinds, autostart
+  etc/greetd/                 login screen
+  usr/bin/firox-*             taskbar, Start menu, Settings and the other tools
+  usr/share/firox/themes/     the Classic, Modern and Glass looks
+  usr/share/themes/Firox-*/   window themes
+  usr/share/ublue-os/just/60-custom.just   ujust commands
+disk_config/                  VM image and ISO definitions (bootc-image-builder)
+docs/                         this website (GitHub Pages) and screenshots
+Justfile                      local build commands</code></pre></div>
+
+<h2 id="limitations">Known limitations</h2>
+<ul>
+    <li><b>Waydroid:</b> needs a supported GPU for hardware acceleration. Intel and AMD are fine; on NVIDIA it uses software rendering. It doesn't work where Secure Boot blocks its binder module.</li>
+    <li><b>NVIDIA image:</b> only supports GTX 16 / RTX 20 series and newer cards, because it uses NVIDIA's open driver.</li>
+    <li><b>PWAsForFirefox:</b> the extension is installed by a Firefox policy on first launch, so Firefox needs network access the first time.</li>
+    <li><b>New code:</b> much of the desktop (the taskbar, Start menu, Settings and tools) is new and hasn't had much testing on real hardware yet. <a href="https://github.com/kurodenkou/firox/issues">Report problems on GitHub</a>.</li>
+</ul>
+
+</div>
+</main>
+<footer class="site-footer">
+    <div class="wrap">
+        <span>Firox Linux, built on <a href="https://universal-blue.org/">Universal Blue</a> (Fedora Atomic). Themes, icons, wallpapers and the Start menu are original work; no Microsoft assets are used.</span>
+        <span><a href="https://github.com/kurodenkou/firox">Source on GitHub</a> · <a href="https://github.com/kurodenkou/firox/issues">Report a problem</a></span>
+    </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>
