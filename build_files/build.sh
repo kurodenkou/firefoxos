@@ -94,6 +94,7 @@ PACKAGES=(
     vlc                          # Media Player (music, videos, DVDs)
     vlc-plugin-ffmpeg            # VLC's codecs (weak deps are off; uses the base's full ffmpeg)
     fastfetch
+    zenity                       # dialogs for shell scripts (zenity --info, --question, --file-selection...)
     rsync                        # Backup and Restore (firox-backup)
     syncthing                    # Sync between Firox computers (firox-sync)
 
