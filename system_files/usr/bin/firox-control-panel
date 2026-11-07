@@ -33,7 +33,7 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
-# (icon, title, description, argv)
+# (icon, title, description, argv). Shown in alphabetical order of title.
 APPLETS = [
     ("preferences-desktop-display", "Display", "Screen resolution, scaling and multiple monitors", ["firox-display"]),
     ("preferences-desktop-screensaver", "Screen Saver", "Aquarium, Matrix, Bonsai and more when idle",
@@ -1244,7 +1244,8 @@ class ControlPanel(Gtk.ApplicationWindow):
         flow.set_margin_start(12)
         flow.set_margin_end(12)
         self.applets = {}
-        for icon, title, desc, argv in APPLETS:
+        # Alphabetical, like XP's Control Panel in Classic View
+        for icon, title, desc, argv in sorted(APPLETS, key=lambda a: a[1].casefold()):
             child = Gtk.FlowBoxChild()
             row = Gtk.Box(spacing=10)
             row.set_size_request(180, -1)
