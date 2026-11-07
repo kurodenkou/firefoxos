@@ -1,5 +1,7 @@
 # Firox Linux
 
+**Website: [kurodenkou.github.io/firox](https://kurodenkou.github.io/firox/)**
+
 A desktop Linux built on [Universal Blue](https://universal-blue.org/) (Fedora Atomic): image-based, self-updating, with a familiar classic desktop layout. It includes:
 
 - **A custom Wayland desktop laid out like the classic XP desktop**: taskbar with a **firox** button, a two-column Start menu, Quick Launch, notification area, desktop icons and Settings (an XP-style Control Panel). It comes in three looks: **Modern** (grey and translucent, with dark apps; the default), **Classic** (blue "Luna"-style with a green start button) and **Glass** (frosted glass with bright edges over a colourful wallpaper).
@@ -213,7 +215,7 @@ From then on it updates normally (`ujust update`). On your first login afterward
 | `ujust install-app-store` | Install the Bazaar Flatpak store |
 | `ujust customize-desktop` | Copy the labwc defaults into `~/.config` to edit |
 | `ujust reset-desktop` | Back up your overrides and restore defaults |
-| `ujust theme [classic\|modern]` | Switch between the Classic and Modern look |
+| `ujust theme [classic\|modern\|glass]` | Switch between the Classic, Modern and Glass looks |
 | `ujust screensaver [ID] [MINUTES]` | List screen savers, or pick one (`none` turns them off) and how long to wait |
 | `ujust dark-mode [on\|off\|auto]` | Dark or light apps regardless of the look (`auto` follows it) |
 | `ujust power-saving [KEY=MINUTES...\|reset]` | Show or change the monitor-off, lock and sleep timers (e.g. `MONITOR_AC=10 SLEEP_BATTERY=20`; 0 = never) |
@@ -240,7 +242,7 @@ Each look's styling lives in `/usr/share/firox/themes/{classic,modern,glass}/` (
 
 ## Building and signing
 
-GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` and `ghcr.io/<owner>/firox-nvidia-open` on every push to `main` and every day, and test-builds pull requests. Changes that only touch Markdown or `docs/` don't trigger a build. Disk images (`build-disk.yml`) are only built when started by hand. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
+GitHub Actions (`.github/workflows/build.yml`) builds and pushes `ghcr.io/<owner>/firox` and `ghcr.io/<owner>/firox-nvidia-open` on every push to `main` and every day, and test-builds pull requests. Changes that only touch Markdown or `docs/` don't trigger a build. The website in `docs/` is served by GitHub Pages (Settings → Pages: deploy from the `main` branch, `/docs` folder). Disk images (`build-disk.yml`) are only built when started by hand. To sign images, generate a key pair with `cosign generate-key-pair` and add the private key as the `SIGNING_SECRET` repository secret. Without it, the build still runs and signing is skipped.
 
 ## Known limitations
 

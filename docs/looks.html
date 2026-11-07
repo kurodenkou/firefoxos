@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Looks · Firox Linux</title>
+<meta name="description" content="Firox Linux comes in three looks with the same layout: Modern (grey, dark apps), Classic (blue and green) and Glass (frosted glass).">
+<meta property="og:title" content="Looks · Firox Linux">
+<meta property="og:description" content="Firox Linux comes in three looks with the same layout: Modern (grey, dark apps), Classic (blue and green) and Glass (frosted glass).">
+<meta property="og:image" content="screenshots/glass.png">
+<link rel="icon" href="assets/firox-orb.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="wrap">
+        <a class="brand" href="index.html"><img src="assets/firox-orb.svg" alt=""><span>firox</span> Linux</a>
+        <nav class="nav" aria-label="Site">
+        <a href="index.html">Home</a>
+        <a href="looks.html" aria-current="page">Looks</a>
+        <a href="features.html">Features</a>
+        <a href="install.html">Install</a>
+        <a href="guide.html">Guide</a>
+        <a href="https://github.com/kurodenkou/firox">GitHub</a>
+        </nav>
+    </div>
+</header>
+<section class="hero page-hero">
+    <div class="wrap">
+        <h1>Three looks, one layout</h1>
+        <p class="lead">Modern, Classic and Glass change the colours, not where things are. Switch any time in Settings → Appearance.</p>
+    </div>
+</section>
+<main>
+<div class="wrap">
+
+<ul class="toc">
+    <li><a href="#modern">Modern</a></li>
+    <li><a href="#classic">Classic</a></li>
+    <li><a href="#glass">Glass</a></li>
+    <li><a href="#apps">Light or dark apps</a></li>
+    <li><a href="#switching">Switching looks</a></li>
+</ul>
+
+<h2 id="modern">Modern</h2>
+<p><b>Modern</b> is the default. It's grey, flat and translucent, and it switches your apps to dark mode, covering GTK and libadwaita apps, Firefox and web apps (which follow the system colour scheme), and Qt apps like the file manager.</p>
+<div class="shots">
+    <figure>
+    <img src="screenshots/modern-start-menu.png" alt="Modern Start menu: translucent dark grey" loading="lazy">
+    <figcaption>Modern Start menu</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/modern-turn-off.png" alt="Modern Turn Off dialog" loading="lazy">
+    <figcaption>Modern Turn Off dialog</figcaption>
+</figure>
+</div>
+<figure>
+    <img src="screenshots/modern-dark-apps.png" alt="Modern look with apps in dark mode" loading="lazy">
+    <figcaption>Modern switches apps to dark mode</figcaption>
+</figure>
+
+<h2 id="classic">Classic</h2>
+<p><b>Classic</b> is blue and green: a "Luna"-style taskbar and title bars with a green start button. Apps are light.</p>
+<div class="shots">
+    <figure>
+    <img src="screenshots/desktop.png" alt="Classic desktop" loading="lazy">
+    <figcaption>Desktop</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/all-programs.png" alt="Classic All Programs menu" loading="lazy">
+    <figcaption>All Programs</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/log-off.png" alt="Classic Log Off dialog" loading="lazy">
+    <figcaption>Log Off</figcaption>
+</figure>
+</div>
+
+<h2 id="glass">Glass</h2>
+<p><b>Glass</b> turns the taskbar, Start menu, pop-ups and window title bars into frosted glass: light and translucent, with bright rims and round glass window buttons. It has its own indigo-to-rose wallpaper. Apps stay light.</p>
+<figure>
+    <img src="screenshots/glass.png" alt="Glass look: frosted taskbar, translucent Start menu and glass title bars over a colourful wallpaper" loading="lazy">
+    <figcaption>The Glass look</figcaption>
+</figure>
+<p>It's inspired by the <a href="https://github.com/bergice/liquidglass">liquidglass</a> WebGL demo (MIT), which blurs and bends a background picture inside a rounded glass shape.</p>
+<ul>
+    <li><b>The taskbar:</b> desktops like this one can't blur what's behind a window. But only the wallpaper is ever behind the taskbar, so the taskbar paints that strip of wallpaper itself, blurred and slightly magnified at its top and bottom edges like the demo's lens. The frost and rims go on top.</li>
+    <li><b>The Start menu and pop-ups:</b> translucent sheets with the same rims.</li>
+</ul>
+
+<h2>The login screen</h2>
+<p>The login screen shows everyone's account picture and matches the default look.</p>
+<div class="shots">
+    <figure>
+    <img src="screenshots/login-modern.png" alt="Modern login screen" loading="lazy">
+    <figcaption>Modern</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/login-classic.png" alt="Classic login screen" loading="lazy">
+    <figcaption>Classic</figcaption>
+</figure>
+</div>
+
+<h2 id="apps">Light or dark apps</h2>
+<p>Want Modern with light apps, or Classic with dark ones? The <b>Appearance</b> window also has a <b>Programs</b> setting:</p>
+<ul>
+    <li><b>Match the look</b> (the default): dark apps with Modern, light apps with Classic and Glass.</li>
+    <li><b>Light</b> or <b>Dark</b>: apps stay that way whichever look you choose.</li>
+</ul>
+<p>From a terminal:</p>
+<div class="code"><pre><code>ujust dark-mode on</code></pre></div>
+<p>Use <code>on</code>, <code>off</code> or <code>auto</code>; <code>firox-theme apps dark|light|auto</code> does the same.</p>
+
+<h2 id="switching">Switching looks</h2>
+<p>Open <b>Settings → Appearance</b>, or use a terminal:</p>
+<div class="code"><pre><code>ujust theme glass</code></pre></div>
+<p>Use <code>classic</code>, <code>modern</code> or <code>glass</code>; <code>firox-theme set NAME</code> does the same.</p>
+<ul>
+    <li><b>When it applies:</b> straight away on the running desktop, and it's saved for each user.</li>
+    <li><b>Wallpaper:</b> switches too, unless you've picked your own.</li>
+    <li><b>New users:</b> get the look set in <code>/etc/firox/theme</code> (<code>modern</code>), with its wallpaper and app style, on their first login. Change it to <code>classic</code> or <code>glass</code> to make that look the default.</li>
+</ul>
+<p>Want a look of your own? See <a href="guide.html#customising">Customising</a>.</p>
+<p class="tech">Screenshots are from the built image running headless (labwc and grim).</p>
+
+</div>
+</main>
+<footer class="site-footer">
+    <div class="wrap">
+        <span>Firox Linux, built on <a href="https://universal-blue.org/">Universal Blue</a> (Fedora Atomic). Themes, icons, wallpapers and the Start menu are original work; no Microsoft assets are used.</span>
+        <span><a href="https://github.com/kurodenkou/firox">Source on GitHub</a> · <a href="https://github.com/kurodenkou/firox/issues">Report a problem</a></span>
+    </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

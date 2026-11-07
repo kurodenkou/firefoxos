@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Features · Firox Linux</title>
+<meta name="description" content="Everything in the Firox Linux desktop: taskbar, Start menu, Wi-Fi and Bluetooth pop-ups, System Restore, Backup, Sync, gadgets, Task Manager and more.">
+<meta property="og:title" content="Features · Firox Linux">
+<meta property="og:description" content="Everything in the Firox Linux desktop: taskbar, Start menu, Wi-Fi and Bluetooth pop-ups, System Restore, Backup, Sync, gadgets, Task Manager and more.">
+<meta property="og:image" content="screenshots/glass.png">
+<link rel="icon" href="assets/firox-orb.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="wrap">
+        <a class="brand" href="index.html"><img src="assets/firox-orb.svg" alt=""><span>firox</span> Linux</a>
+        <nav class="nav" aria-label="Site">
+        <a href="index.html">Home</a>
+        <a href="looks.html">Looks</a>
+        <a href="features.html" aria-current="page">Features</a>
+        <a href="install.html">Install</a>
+        <a href="guide.html">Guide</a>
+        <a href="https://github.com/kurodenkou/firox">GitHub</a>
+        </nav>
+    </div>
+</header>
+<section class="hero page-hero">
+    <div class="wrap">
+        <h1>What's in the desktop</h1>
+        <p class="lead">Everything is built for Firox: the taskbar, Start menu, Settings and the tools you reach from them.</p>
+    </div>
+</section>
+<main>
+<div class="wrap">
+
+<ul class="toc">
+    <li><a href="#taskbar">Taskbar and Start menu</a></li>
+    <li><a href="#network">Network and devices</a></li>
+    <li><a href="#tools">Everyday tools</a></li>
+    <li><a href="#safe">Updates, restore and backup</a></li>
+    <li><a href="#settings">Settings and login</a></li>
+    <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+</ul>
+
+<h2 id="taskbar">Taskbar and Start menu</h2>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>The taskbar</h3>
+        <p>A start button, Quick Launch, window buttons, the notification area and the clock, on every monitor with that monitor's windows.</p>
+<ul>
+    <li><b>Grouping:</b> windows of the same app share one button ("3 Foot ▴"); click it to pick a window.</li>
+    <li><b>Window buttons:</b> click to show or minimise. Right-click for Restore, Minimize, Maximize and Close; middle-click closes.</li>
+    <li><b>Quick Launch:</b> right-click a program in the Start menu, or a window button, and choose <b>Pin to Quick Launch</b>. Drag buttons and icons to rearrange them.</li>
+    <li><b>Settings → Taskbar</b> (or right-click an empty part of the taskbar): auto-hide, grouping, Quick Launch and seconds on the clock.</li>
+</ul>
+        <p class="tech">firox-panel (GTK, layer-shell, window list over wlr-foreign-toplevel-management). Styled by the theme's panel.css; your own rules go in ~/.config/firox/panel.css. waybar is kept as a fallback.</p>
+    </div>
+    <figure>
+    <img src="screenshots/taskbar.png" alt="Taskbar: grouped terminals, the same windows ungrouped, and the Modern look" loading="lazy">
+    <figcaption>Grouped, ungrouped, and in the Modern look</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>The Start menu</h3>
+        <ul>
+    <li><b>Top:</b> your account picture and name.</li>
+    <li><b>Left column:</b> pinned <b>Internet</b>, <b>Web Apps</b> and <b>Android Apps</b>, your most-used programs, and <b>All Programs</b>, grouped into folders. Start typing to search.</li>
+    <li><b>Right column:</b> Documents, Pictures, Music, Computer, Network Places, Settings, <b>Bazaar</b> (the app store), Help, Search and Run.</li>
+    <li><b>Bottom:</b> <b>Log Off</b> and <b>Turn Off Computer</b> dialogs.</li>
+</ul>
+        <p class="tech">firox-startmenu (Python, GTK3, gtk-layer-shell)</p>
+    </div>
+    <figure>
+    <img src="screenshots/all-programs.png" alt="All Programs in the Start menu" loading="lazy">
+    <figcaption>All Programs</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Volume, battery and the clock</h3>
+        <ul>
+    <li><b>Speaker:</b> click for a volume slider with Mute and a choice of speakers or headphones.</li>
+    <li><b>Battery:</b> click for the charge and time left, battery health, a brightness slider and the power mode (Power saver, Balanced or Performance). Right-click it for Power Options.</li>
+    <li><b>Clock:</b> click for a month calendar; right-click it for Date and Time settings.</li>
+    <li><b>Volume and brightness keys:</b> a small level pop-up appears at the bottom of the screen.</li>
+</ul>
+        <p class="tech">firox-volume, firox-battery (power modes via tuned-ppd), firox-calendar, firox-osd</p>
+    </div>
+    <figure>
+    <img src="screenshots/battery.png" alt="Battery pop-up in Classic and Modern" loading="lazy">
+    <figcaption>Battery pop-up, Classic and Modern</figcaption>
+</figure>
+</div>
+
+<div class="shots">
+    <figure>
+    <img src="screenshots/volume.png" alt="Volume pop-up" loading="lazy">
+    <figcaption>Volume</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/calendar.png" alt="Calendar pop-up" loading="lazy">
+    <figcaption>Calendar</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/osd.png" alt="Volume and brightness level pop-ups" loading="lazy">
+    <figcaption>Volume and brightness keys</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Notifications</h3>
+        <p>Notifications pop up as small "balloons".</p>
+<ul>
+    <li><b>The bell</b> in the notification area opens your last 100 notifications; click one to open its app.</li>
+    <li><b>Do Not Disturb</b> (in the panel, or right-click the bell) holds pop-ups except urgent ones.</li>
+    <li>Pop-ups also wait while a screen saver runs.</li>
+</ul>
+        <p class="tech">mako and firox-notifications</p>
+    </div>
+    <figure>
+    <img src="screenshots/notifications.png" alt="Notification panel in Modern and Classic" loading="lazy">
+    <figcaption>Notification panel</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Run</h3>
+        <p>Start → Run… or <kbd>Super</kbd>+<kbd>R</kbd>: type a program, a folder, a file, a web address or any command.</p>
+<ul>
+    <li><b>As you type:</b> the rest of a matching name fills in.</li>
+    <li><b>History:</b> it remembers your last 26 entries.</li>
+    <li><b>Terminal:</b> "Run in a terminal window" shows a command's output.</li>
+    <li><b>Old names:</b> Windows names work too: <code>cmd</code>, <code>notepad</code>, <code>calc</code>, <code>control</code>, <code>taskmgr</code>, <code>msconfig</code>…</li>
+</ul>
+        <p class="tech">firox-run</p>
+    </div>
+    <figure>
+    <img src="screenshots/run-startup.png" alt="Run box, Startup Programs and Add a Startup Program" loading="lazy">
+    <figcaption>Run, and Startup Programs</figcaption>
+</figure>
+</div>
+
+<h2 id="network">Network and devices</h2>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Wi-Fi and Bluetooth</h3>
+        <p>Both have their own pop-up on the taskbar.</p>
+<ul>
+    <li><b>Network icon:</b> a Wi-Fi switch and the networks in range, strongest first. Click one to connect, and type its password right there. Wired, VPNs and <b>Airplane mode</b> are here too, plus <b>Network Connections…</b> for work networks that need a username or certificate.</li>
+    <li><b>Bluetooth icon:</b> your devices, with battery levels, to connect, disconnect or remove. <b>Add a device…</b> finds new ones; a small window asks you to compare or type a pairing code.</li>
+</ul>
+        <p class="tech">firox-network (NetworkManager's libnm), firox-bluetooth (BlueZ, with its own pairing agent)</p>
+    </div>
+    <figure>
+    <img src="screenshots/network-bluetooth.png" alt="Wi-Fi and Bluetooth pop-ups, and the pairing prompt" loading="lazy">
+    <figcaption>Wi-Fi and Bluetooth, Classic and Modern</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Mouse, touchpad and keyboard</h3>
+        <ul>
+    <li><b>Settings → Mouse:</b> pointer speed, left-handed buttons, double-click speed, pointer size, scrolling. Its Touchpad tab covers tap to click, two-finger scrolling, the right-click method, ignore while typing, and off when a mouse is plugged in.</li>
+    <li><b>Settings → Keyboard:</b> repeat speed, Num Lock at login, and keyboard layouts with a shortcut to switch between them.</li>
+</ul>
+        <p class="tech">firox-input, stored in ~/.config/firox/input.conf. A personal labwc rc.xml still wins.</p>
+    </div>
+    <figure>
+    <img src="screenshots/mouse-touchpad.png" alt="Mouse settings, Touchpad tab" loading="lazy">
+    <figcaption>Mouse → Touchpad</figcaption>
+</figure>
+</div>
+
+<div class="grid two">
+<div class="card">
+    <h3>Displays</h3>
+    <p><b>Settings → Display</b> arranges your monitors and saves the layout for each set of connected screens. It's re-applied at login and when you plug a monitor in.</p>
+    <p class="tech">firox-display, wdisplays, kanshi, firox-displays</p>
+</div>
+<div class="card">
+    <h3>Power saving</h3>
+    <p><b>Settings → Power Options:</b> lock the screen, turn off the monitor and sleep after set idle times, with separate <b>Plugged in</b> and <b>On battery</b> times on laptops. Laptops warn at 10% and 5% battery, then sleep at 3%. Videos and full-screen apps keep the screen on.</p>
+    <p class="tech">firox-power; system defaults in /etc/firox/power.conf</p>
+</div>
+</div>
+<div class="shots">
+    <figure>
+    <img src="screenshots/keyboard-layouts.png" alt="Keyboard settings, Layouts" loading="lazy">
+    <figcaption>Keyboard → Layouts</figcaption>
+</figure>
+    <figure>
+    <img src="screenshots/power-options.png" alt="Power Options on a laptop" loading="lazy">
+    <figcaption>Power Options</figcaption>
+</figure>
+</div>
+
+<h2 id="tools">Everyday tools</h2>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Snipping Tool</h3>
+        <p>Start → All Programs, or <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.</p>
+<ul>
+    <li><b>What to snip:</b> a rectangle, the whole screen or one monitor, with an optional delay.</li>
+    <li><b>Afterwards:</b> each snip is copied straight away. Mark it up with a pen or highlighter, then copy or save it.</li>
+    <li><b>Print Screen</b> still saves the whole screen to Pictures.</li>
+</ul>
+        <p class="tech">firox-snip</p>
+    </div>
+    <figure>
+    <img src="screenshots/snipping-tool.png" alt="Snipping Tool" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Clipboard history</h3>
+        <ul>
+    <li>What you copy stays available after the app you copied it from closes.</li>
+    <li><kbd>Super</kbd>+<kbd>V</kbd> shows your clipboard history, with search and images.</li>
+    <li>Passwords that password managers mark as sensitive are never kept, and the history is cleared when you log off.</li>
+</ul>
+        <p class="tech">firox-clipboard (cliphist). Settings → Clipboard sets the size or turns it off.</p>
+    </div>
+    <figure>
+    <img src="screenshots/clipboard-history.png" alt="Clipboard history" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Desktop Gadgets</h3>
+        <p>A Sidebar on the right of the desktop with a Clock, Calendar, CPU Meter, Weather (no account needed; set your city in its options), a Slide Show of your Pictures and Notes.</p>
+<ul>
+    <li><b>+ Gadgets</b> adds more.</li>
+    <li>Right-click a gadget for its options.</li>
+</ul>
+        <p class="tech">firox-gadgets; weather from Open-Meteo. Turn it off in Settings → Taskbar.</p>
+    </div>
+    <figure>
+    <img src="screenshots/gadgets.png" alt="Desktop Gadgets: the Sidebar and Add Gadgets" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Task Manager</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Del</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>.</p>
+<ul>
+    <li><b>Applications:</b> switch to or end a program.</li>
+    <li><b>Processes:</b> CPU and memory for each process.</li>
+    <li><b>Performance:</b> green-on-black graphs of CPU and memory use.</li>
+</ul>
+<p>btop is in the Start menu too, as Resource Monitor.</p>
+        <p class="tech">firox-taskmgr</p>
+    </div>
+    <figure>
+    <img src="screenshots/task-manager.png" alt="Task Manager: Processes and Performance" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Screen savers</h3>
+        <p><b>Settings → Screen Saver:</b> Aquarium, Matrix, Bonsai, Bouncing firox, Starfield or Blank, full screen on every monitor, with Preview.</p>
+<p>They're off by default. <a href="guide.html#screen-savers">Add your own</a>.</p>
+        <p class="tech">firox-screensaver (asciiquarium, cmatrix, cbonsai and more)</p>
+    </div>
+    <figure>
+    <img src="screenshots/screensavers.png" alt="Screen Saver settings" loading="lazy">
+</figure>
+</div>
+
+<div class="grid two">
+<div class="card">
+    <h3>Alt+Tab with previews</h3>
+    <p><kbd>Alt</kbd>+<kbd>Tab</kbd> switches windows with live previews.</p>
+</div>
+<div class="card">
+    <h3>Also included</h3>
+    <p>A Command Prompt (xfce4-terminal, with tabs; <kbd>Super</kbd>+<kbd>Enter</kbd>), Media Player (VLC, with full codecs), Notepad, Calculator and a picture viewer.</p><p><code>zenity</code> is included for dialogs in shell scripts.</p>
+</div>
+</div>
+<figure>
+    <img src="screenshots/alt-tab.png" alt="Alt+Tab window switcher" loading="lazy">
+    <figcaption>Alt+Tab</figcaption>
+</figure>
+
+<h2 id="safe">Updates, restore and backup</h2>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Automatic updates</h3>
+        <p>Updates download in the background and apply at the next restart.</p>
+<ul>
+    <li><b>Waiting update:</b> an icon appears in the notification area. Click it to restart, or right-click to see what changes.</li>
+    <li><b>Afterwards:</b> "Firox Linux was updated" tells you once it's done.</li>
+</ul>
+        <p class="tech">firox-updates, rpm-ostree</p>
+    </div>
+    <figure>
+    <img src="screenshots/boot-splash.png" alt="Firox boot splash" loading="lazy">
+    <figcaption>The Firox boot screen</figcaption>
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>System Restore</h3>
+        <p>Lists the versions of Firox installed on your computer.</p>
+<ul>
+    <li><b>Restore</b> goes back to the previous one, with Undo.</li>
+    <li><b>Keep</b> holds a version even after later updates.</li>
+    <li><b>Other options:</b> see what changed between versions, cancel a waiting update, or pause automatic updates.</li>
+</ul>
+<p>Your files, settings and apps aren't affected.</p>
+        <p class="tech">firox-restore (rpm-ostree rollback, ostree admin pin)</p>
+    </div>
+    <figure>
+    <img src="screenshots/system-restore.png" alt="System Restore" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Backup and Restore</h3>
+        <p>Backs up your home folder every hour to a USB drive or a network folder, and as soon as the backup drive is plugged in.</p>
+<ul>
+    <li><b>Each backup</b> is a dated folder with a complete copy, but unchanged files aren't stored twice.</li>
+    <li><b>What's kept:</b> hourly backups for a day, daily for a month, then weekly.</li>
+    <li><b>Restore</b> files from any date, or everything.</li>
+</ul>
+        <p class="tech">firox-backup (rsync --link-dest, like the original Time Machine). FAT/exFAT drives and most network shares get a Latest copy plus Older versions.</p>
+    </div>
+    <figure>
+    <img src="screenshots/backup.png" alt="Backup and Restore" loading="lazy">
+</figure>
+</div>
+
+<div class="feature">
+    <div class="feature-text">
+        <h3>Sync between your computers</h3>
+        <p>Firox computers on the same network find each other.</p>
+<ul>
+    <li><b>Pairing:</b> with a 6-digit PIN shown on the other computer. The PIN never crosses the network.</li>
+    <li><b>What syncs:</b> the folders you tick (Documents, Pictures, Music, Videos, Desktop) stay the same on all of them.</li>
+    <li><b>Older versions:</b> replaced or deleted files are kept for 30 days.</li>
+</ul>
+        <p class="tech">firox-sync: Avahi discovery and a private, local-network-only Syncthing</p>
+    </div>
+    <figure>
+    <img src="screenshots/sync.png" alt="Sync window and the PIN on the other computer" loading="lazy">
+</figure>
+</div>
+
+<h2 id="settings">Settings and login</h2>
+
+<div class="grid two">
+<div class="card">
+    <h3>Settings</h3>
+    <p>The Control Panel, in alphabetical order. It covers:</p><ul><li>Display, sound, network, Bluetooth, printers and disks</li><li>Web Apps, Android and the Bazaar app store</li><li>Date and Time, <b>Taskbar</b> and <b>Default Programs</b> (browser, email, music, pictures and more)</li><li><b>User Accounts</b> (your picture and password), Startup Programs, System Restore, Backup and Sync</li></ul>
+    <p class="tech">firox-control-panel</p>
+</div>
+<div class="card">
+    <h3>Startup Programs</h3>
+    <p>Tick what starts when you log in: any Start menu program or your own command. Apps' own &ldquo;start at login&rdquo; options show up here too. Also reachable by typing <code>msconfig</code> in Run.</p>
+    <p class="tech">firox-startup, using standard ~/.config/autostart entries</p>
+</div>
+<div class="card">
+    <h3>Login screen</h3>
+    <p>&ldquo;To begin, click your user name&rdquo;, with everyone's account picture. <b>Other user…</b> covers accounts that aren't listed, and <b>Turn off computer</b> offers sleep, turn off and restart. It uses the keyboard layout chosen when installing.</p>
+    <p class="tech">firox-welcome, a greetd greeter</p>
+</div>
+<div class="card">
+    <h3>Windows</h3>
+    <p>Title bars with minimise, maximise and close buttons in each look's style. Drag windows to the screen edges to snap them, and press <kbd>Alt</kbd>+<kbd>Space</kbd> for the window menu.</p>
+    <p class="tech">labwc (wlroots, Openbox-style)</p>
+</div>
+</div>
+<figure>
+    <img src="screenshots/user-accounts.png" alt="User Accounts: change your picture or password" loading="lazy">
+    <figcaption>User Accounts</figcaption>
+</figure>
+
+<h2 id="shortcuts">Keyboard shortcuts</h2>
+<div class="keys">
+    <div><span><kbd>Super</kbd></span><span>Start menu</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>E</kbd></span><span>Computer</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>R</kbd></span><span>Run</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>D</kbd></span><span>Show the desktop</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>L</kbd></span><span>Lock</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>V</kbd></span><span>Clipboard history</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>←</kbd> / <kbd>→</kbd></span><span>Snap a window</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>Enter</kbd></span><span>Command Prompt</span></div>
+    <div><span><kbd>Alt</kbd>+<kbd>Tab</kbd></span><span>Switch windows</span></div>
+    <div><span><kbd>Alt</kbd>+<kbd>Space</kbd></span><span>Window menu</span></div>
+    <div><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Del</kbd></span><span>Task Manager</span></div>
+    <div><span><kbd>PrtSc</kbd></span><span>Screenshot to Pictures</span></div>
+    <div><span><kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></span><span>Snipping Tool</span></div>
+</div>
+
+</div>
+</main>
+<footer class="site-footer">
+    <div class="wrap">
+        <span>Firox Linux, built on <a href="https://universal-blue.org/">Universal Blue</a> (Fedora Atomic). Themes, icons, wallpapers and the Start menu are original work; no Microsoft assets are used.</span>
+        <span><a href="https://github.com/kurodenkou/firox">Source on GitHub</a> · <a href="https://github.com/kurodenkou/firox/issues">Report a problem</a></span>
+    </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>
